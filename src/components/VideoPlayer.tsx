@@ -155,7 +155,7 @@ const VideoPlayer = ({ video, onPlayed, onComplete, onProgress, onMinuteWatched 
       const src = detected.embedUrl!;
       const startPlyr = () => {
         const player = new Plyr(video, {
-          controls: ["play-large","play","progress","current-time","duration","captions","settings","pip","airplay","fullscreen"],
+          controls: ["play-large","play","progress","current-time","duration","captions","settings","airplay","fullscreen"],
           autoplay: true, ratio: "16:9", hideControls: true, resetOnEnd: false, muted: false, volume: 1,
         });
         attachPlyrTracking(player);
