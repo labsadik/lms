@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 98%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+    --primary: 0 85% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 0 85% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 0 85% 50%;
+    --radius: 0.5rem;
+
+    --player: 0 0% 0%;
+    --playlist: 0 0% 97%;
+    --playlist-active: 0 85% 50% / 0.12;
+    --playlist-hover: 0 0% 93%;
+
+    --gold: 45 100% 45%;
+    --gold-foreground: 0 0% 10%;
+    --xp: 210 90% 45%;
+    --coin: 45 100% 45%;
+    --streak: 25 95% 50%;
+  }
+
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 100% 50%;
+
+    --player: 0 0% 0%;
+    --playlist: 0 0% 7%;
+    --playlist-active: 0 100% 50% / 0.15;
+    --playlist-hover: 0 0% 12%;
+
+    --xp: 200 100% 65%;
+    --coin: 45 100% 55%;
+    --streak: 25 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* ===== Plyr Custom Skin ===== */
+.plyr-container {
+  --plyr-color-main: hsl(0, 100%, 50%);
+  --plyr-video-background: #000;
+  --plyr-menu-background: rgba(20, 20, 20, 0.95);
+  --plyr-menu-color: #fff;
+  --plyr-tooltip-background: rgba(0, 0, 0, 0.85);
+  --plyr-tooltip-color: #fff;
+  --plyr-control-icon-size: 16px;
+  --plyr-control-spacing: 8px;
+  width: 100%;
+  height: 100%;
+}
+
+.plyr-container .plyr {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.plyr-container .plyr--video,
+.plyr-container .plyr__video-wrapper {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.plyr-container .plyr__video-embed,
+.plyr-container .plyr__video-embed > div {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0 !important;
+}
+
+.plyr-container .plyr__video-embed iframe {
+  position: absolute;
+  top: -5%;
+  left: -5%;
+  width: 110%;
+  height: 110%;
+  border: 0;
+}
+
+/* Mask any leftover YouTube chrome */
+.plyr-container .plyr__video-embed::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+.plyr-container .plyr__video-embed::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 90px;
+  background: #000;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Hide volume + native overlaid play */
+.plyr-container .plyr__volume,
+.plyr-container .plyr__control[data-plyr="mute"],
+.plyr-container .plyr__control--overlaid {
+  display: none !important;
+}
+
+/* Pin controls to bottom */
+.plyr-container .plyr__controls {
+  position: absolute !important;
+  left: 0; right: 0; bottom: 0;
+  top: auto !important;
+  z-index: 5;
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 60%, transparent 100%);
+  padding: 16px 12px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plyr-container .plyr__progress {
+  flex: 1 1 auto;
+  margin: 0 6px;
+}
+
+.plyr-container .plyr__menu__container {
+  bottom: 100%;
+  top: auto !important;
+}
+
+@media (max-width: 640px) {
+  .plyr-container { --plyr-control-icon-size: 14px; --plyr-control-spacing: 6px; }
+  .plyr-container .plyr__controls { padding: 12px 8px 8px; }
+  .plyr-container .plyr__time { font-size: 11px; }
+}
+@media (max-width: 380px) {
+  .plyr-container .plyr__control[data-plyr="pip"],
+  .plyr-container .plyr__control[data-plyr="airplay"] { display: none !important; }
+}
+
+/* Animations */
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, hsl(var(--muted)), transparent);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
