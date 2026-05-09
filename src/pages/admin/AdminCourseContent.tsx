@@ -224,7 +224,7 @@ const AdminCourseContent = () => {
                                   <Video className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                   <span className="truncate font-medium">{p.name}</span>
                                   <span className="text-[10px] text-muted-foreground truncate shrink-0 hidden sm:inline">({p.kind === 'live' ? '🔴 Live' : p.video_id})</span>
-                                  {p.is_preview && <span className="text-[10px] font-bold text-primary shrink-0">FREE</span>}
+                                  {p.is_preview && <span className="text-[10px] font-bold text-primary shrink-0">Guest</span>}
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                   <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openPart(ch.id, ch.parts.length, p)}><Edit className="w-3 h-3" /></Button>
