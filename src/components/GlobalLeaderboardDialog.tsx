@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Trophy, Medal, Coins, PlayCircle, FileCheck2 } from 'lucide-react';
+import { Loader2, Trophy, Medal, Coins, FileCheck2 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 
@@ -12,11 +12,10 @@ type Row = {
   level: number;
   xp: number;
   coins: number;
-  videos: number;
   tests: number;
 };
 
-type SortKey = 'xp' | 'coins' | 'videos' | 'tests';
+type SortKey = 'xp' | 'coins' | 'tests';
 
 const TTL_MS = 60_000; // 1 minute
 const cache = new Map<string, { ts: number; rows: Row[] }>();
@@ -25,7 +24,6 @@ const sortRows = (rows: Row[], key: SortKey) =>
   [...rows].sort((a, b) => {
     if (key === 'xp') return (b.xp - a.xp) || (b.coins - a.coins);
     if (key === 'coins') return (b.coins - a.coins) || (b.xp - a.xp);
-    if (key === 'videos') return (b.videos - a.videos) || (b.xp - a.xp);
     return (b.tests - a.tests) || (b.xp - a.xp);
   }).slice(0, 100);
 
@@ -64,11 +62,10 @@ export default function GlobalLeaderboardDialog({ open, onOpenChange }: { open: 
           display_name: r.profiles?.display_name ?? null,
           avatar_url: r.profiles?.avatar_url ?? null,
           level: r.profiles?.level ?? 1,
-          xp: 0, coins: 0, videos: 0, tests: 0,
+          xp: 0, coins: 0, tests: 0,
         };
         agg[r.user_id].xp += r.xp || 0;
         agg[r.user_id].coins += r.coins || 0;
-        if (r.source === 'video') agg[r.user_id].videos += 1;
         if (r.source === 'test_attempt') agg[r.user_id].tests += 1;
       }
       const rows = Object.values(agg);
@@ -90,7 +87,6 @@ export default function GlobalLeaderboardDialog({ open, onOpenChange }: { open: 
   const sortMeta: { key: SortKey; label: string }[] = [
     { key: 'xp', label: 'Top XP' },
     { key: 'coins', label: 'Top Coins' },
-    { key: 'videos', label: 'Most Videos' },
     { key: 'tests', label: 'Most Tests' },
   ];
 
@@ -135,13 +131,12 @@ export default function GlobalLeaderboardDialog({ open, onOpenChange }: { open: 
                         <div className="text-sm font-medium truncate">{r.display_name || 'Anonymous'}</div>
                         <div className="text-[11px] text-muted-foreground flex gap-2 flex-wrap">
                           <span>Lvl {r.level}</span>
-                          <span className="flex items-center gap-0.5"><PlayCircle className="w-3 h-3" /> {r.videos}</span>
                           <span className="flex items-center gap-0.5"><FileCheck2 className="w-3 h-3" /> {r.tests}</span>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className={`text-sm font-bold ${sortKey === 'coins' ? 'text-[hsl(var(--coin))]' : 'text-[hsl(var(--xp))]'}`}>
-                          {sortKey === 'coins' ? r.coins.toLocaleString() : sortKey === 'videos' ? `${r.videos} videos` : sortKey === 'tests' ? `${r.tests} tests` : `${r.xp.toLocaleString()} XP`}
+                          {sortKey === 'coins' ? r.coins.toLocaleString() : sortKey === 'tests' ? `${r.tests} tests` : `${r.xp.toLocaleString()} XP`}
                         </div>
                         <div className="text-[11px] flex items-center justify-end gap-2 text-muted-foreground">
                           <span className="flex items-center gap-0.5"><Coins className="w-3 h-3" />{r.coins.toLocaleString()}</span>

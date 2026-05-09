@@ -361,7 +361,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
  $$;
 
 -- ---------------------------------------------------------------------
--- 6.1 LEADERBOARD AGGREGATOR
+-- 6.1 LEADERBOARD AGGREGATOR (Fixed: Admin & User see all, uses coin_ledger)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.get_leaderboard(_course_id uuid DEFAULT NULL)
 RETURNS TABLE (
@@ -390,24 +390,43 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$   WITH user_
     p.display_name,
     p.avatar_url,
     COALESCE(p.level, 1)::integer AS level,
-    CASE WHEN _course_id IS NULL THEN p.xp::bigint ELSE COALESCE(s.sum_xp, 0)::bigint END AS xp,
-    CASE WHEN _course_id IS NULL THEN p.coins::bigint ELSE COALESCE(s.sum_coins, 0)::bigint END AS coins,
+    COALESCE(s.sum_xp, 0)::bigint AS xp,
+    COALESCE(s.sum_coins, 0)::bigint AS coins,
     COALESCE(s.vid_count, 0)::bigint AS videos,
     COALESCE(s.test_count, 0)::bigint AS tests
   FROM public.profiles p
   LEFT JOIN user_stats s ON s.user_id = p.user_id
-  WHERE 
-    (_course_id IS NULL AND (p.xp > 0 OR p.coins > 0)) OR 
-    (_course_id IS NOT NULL AND (COALESCE(s.sum_xp, 0) > 0 OR COALESCE(s.sum_coins, 0) > 0))
   ORDER BY 
-    CASE WHEN _course_id IS NULL THEN p.xp ELSE COALESCE(s.sum_xp, 0) END DESC,
-    CASE WHEN _course_id IS NULL THEN p.coins ELSE COALESCE(s.sum_coins, 0) END DESC
+    COALESCE(s.sum_xp, 0) DESC,
+    COALESCE(s.sum_coins, 0) DESC
   LIMIT 100;
  $$;
 
--- FIX: Grant execute permission so frontend (anon/auth) can call this RPC
-GRANT EXECUTE ON FUNCTION public.get_leaderboard TO anon, authenticated;
+-- FIX: Grant only to authenticated (blocks anon/not-logged-in users)
+REVOKE EXECUTE ON FUNCTION public.get_leaderboard FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_leaderboard TO authenticated;
 
+-- ---------------------------------------------------------------------
+-- 6.1.1 FIX: Sync profiles.xp & coins when coin_ledger updates
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.sync_profile_from_ledger()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ 
+BEGIN
+  UPDATE public.profiles
+  SET 
+    xp = (SELECT COALESCE(SUM(xp), 0) FROM public.coin_ledger WHERE user_id = NEW.user_id),
+    coins = (SELECT COALESCE(SUM(coins), 0) FROM public.coin_ledger WHERE user_id = NEW.user_id)
+  WHERE user_id = NEW.user_id;
+  RETURN NEW;
+END;
+ $$;
+
+DROP TRIGGER IF EXISTS trg_sync_profile_from_ledger ON public.coin_ledger;
+CREATE TRIGGER trg_sync_profile_from_ledger
+  AFTER INSERT ON public.coin_ledger
+  FOR EACH ROW EXECUTE FUNCTION public.sync_profile_from_ledger();
+
+  
 -- =====================================================================
 -- 7. NEW-USER TRIGGER (creates profile + role + referral on signup)
 -- =====================================================================
@@ -670,11 +689,11 @@ CREATE POLICY "Admins view all referrals" ON public.referrals FOR SELECT USING (
 
 -- coin_ledger -------------------------------------------------------
 DROP POLICY IF EXISTS "Users view own ledger" ON public.coin_ledger;
-CREATE POLICY "Users view own ledger" ON public.coin_ledger FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins view all ledger" ON public.coin_ledger;
+CREATE POLICY "All authenticated users view all ledger" ON public.coin_ledger
+FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Users insert own ledger" ON public.coin_ledger;
 CREATE POLICY "Users insert own ledger" ON public.coin_ledger FOR INSERT WITH CHECK (auth.uid() = user_id);
-DROP POLICY IF EXISTS "Admins view all ledger" ON public.coin_ledger;
-CREATE POLICY "Admins view all ledger" ON public.coin_ledger FOR SELECT USING (public.has_role(auth.uid(),'admin'));
 
 -- activity_log ------------------------------------------------------
 DROP POLICY IF EXISTS "Users view own activity" ON public.activity_log;
@@ -798,5 +817,5 @@ CREATE TRIGGER trg_award_badges
 -- DONE — promote your first admin manually:
 -- =====================================================================
 INSERT INTO user_roles (user_id, role)
-SELECT id, 'admin' FROM auth.users WHERE email = 'tiwana5879@badgerhole.com' LIMIT 1;
+SELECT id, 'admin' FROM auth.users WHERE email = 'email' LIMIT 1;
 -- =====================================================================
