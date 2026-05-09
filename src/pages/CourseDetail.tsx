@@ -16,6 +16,22 @@ import { useSEO } from '@/lib/seo';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
+// Helper for proper rich-text description formatting
+const RichText = ({ text }: { text: string }) => {
+  const formattedHtml = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>')
+    .replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em class="text-foreground/80">$1</em>')
+    .replace(/^[\-\*] (.*$)/gm, '<li class="ml-4 list-disc text-foreground/80">$1</li>')
+    .replace(/\n/g, '<br />');
+
+  return (
+    <div 
+      className="text-foreground/90 leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: formattedHtml }} 
+    />
+  );
+};
+
 const CourseDetail = () => {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
@@ -27,6 +43,9 @@ const CourseDetail = () => {
   const [promo, setPromo] = useState('');
   const [discount, setDiscount] = useState<{ amount: number; code: string; promocode_id: string } | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  
+  // State for "Read more" toggle
+  const [isDescExpanded, setIsDescExpanded] = useState(false);
 
   useSEO({
     title: course ? `${course.title} — LearnHub` : 'Course — LearnHub',
@@ -66,7 +85,6 @@ const CourseDetail = () => {
       setTree(sorted);
 
       if (user) {
-        // Webhook may take a moment after Stripe redirect — retry up to 5x.
         const checkEnroll = async () => {
           const { data: en } = await supabase.from('enrollments').select('id').eq('user_id', user.id).eq('course_id', c.id).maybeSingle();
           return !!en;
@@ -132,7 +150,23 @@ const CourseDetail = () => {
           <div>
             <h1 className="text-3xl sm:text-4xl font-bold mb-2">{course.title}</h1>
             {course.instructor && <p className="text-muted-foreground">by {course.instructor}</p>}
-            {course.description && <p className="mt-4 text-foreground/90 leading-relaxed">{course.description}</p>}
+            
+            {/* Swift Description: Clamped by default, "Read more" to expand */}
+            {course.description && (
+              <div className="mt-4">
+                <div className={`${!isDescExpanded ? 'line-clamp-3' : ''} text-foreground/90 leading-relaxed`}>
+                  <RichText text={course.description} />
+                </div>
+                {course.description.length > 150 && (
+                  <button 
+                    onClick={() => setIsDescExpanded(!isDescExpanded)} 
+                    className="text-sm text-primary font-medium mt-1 hover:underline"
+                  >
+                    {isDescExpanded ? 'Show less' : 'Read more'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -158,7 +192,6 @@ const CourseDetail = () => {
                                     <span className="flex items-center gap-2 min-w-0 flex-1">
                                       <Play className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                                       <span className="truncate">{p.name}</span>
-                                      {p.is_preview && <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded flex-shrink-0">Preview</span>}
                                     </span>
                                     {p.duration && <span className="text-xs text-muted-foreground flex-shrink-0">{p.duration}</span>}
                                   </li>
@@ -176,7 +209,8 @@ const CourseDetail = () => {
           </div>
         </div>
 
-        <aside className="space-y-4">
+        {/* Sticky Right Side Enrollment Card */}
+        <aside className="lg:sticky lg:top-24 self-start space-y-4">
           <Card className="overflow-hidden bg-card border-border">
             {course.thumbnail_url && <img src={course.thumbnail_url} alt={course.title} className="w-full aspect-video object-cover" />}
             <div className="p-4 space-y-3">
