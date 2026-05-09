@@ -1,15 +1,17 @@
+// ═══════════════════════════════════════════════════
+// VideoPlayer.tsx
+// ═══════════════════════════════════════════════════
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { Play, Loader2 } from "lucide-react";
-// @ts-ignore
+import { Play, Loader2, AlertCircle } from "lucide-react";
+// @ts-ignore - Plyr's official types are incomplete
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import Hls from "hls.js";
-import { detectVideo } from "@/lib/videoSource";
+import { detectVideo, DetectedVideo } from "@/lib/videoSource";
 
 export interface PlayerVideo {
   id: string;
   title: string;
-  /** Optional override; auto-derived from id when omitted. */
   thumbnail?: string;
   duration?: string;
 }
@@ -17,50 +19,59 @@ export interface PlayerVideo {
 interface VideoPlayerProps {
   video: PlayerVideo;
   onPlayed?: () => void;
-  /** Fired exactly once when the user has watched ≥95% of the video. */
   onComplete?: () => void;
-  /** Fired with current watch progress (0..1) at most once per second. */
   onProgress?: (pct: number) => void;
-  /** Fired each time the user crosses a new whole-minute of *watched* time (1, 2, 3 ...). */
   onMinuteWatched?: (minute: number) => void;
 }
 
-const VideoPlayer = ({ video, onPlayed, onComplete, onProgress, onMinuteWatched }: VideoPlayerProps) => {
-  const detected = useMemo(() => detectVideo(video.id), [video.id]);
+const VideoPlayer = ({
+  video,
+  onPlayed,
+  onComplete,
+  onProgress,
+  onMinuteWatched,
+}: VideoPlayerProps) => {
+  const detected = useMemo<DetectedVideo>(() => detectVideo(video.id), [video.id]);
   const thumbnail = video.thumbnail || detected.thumbnail;
 
-  const [state, setState] = useState<"thumbnail" | "loading" | "playing">("thumbnail");
+  const [state, setState] = useState<"thumbnail" | "loading" | "playing" | "error">("thumbnail");
   const [isSeeking, setIsSeeking] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
   const playerRef = useRef<Plyr | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerElRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+
+  // Tracking
   const completedRef = useRef(false);
   const lastProgressEmitRef = useRef(0);
   const watchedSecondsRef = useRef(0);
   const lastTickTsRef = useRef<number | null>(null);
   const awardedMinuteRef = useRef(0);
-  const minuteIntervalRef = useRef<number | null>(null);
 
   const destroyPlayer = useCallback(() => {
     if (playerRef.current) {
-      try { playerRef.current.destroy(); } catch {}
+      try { playerRef.current.destroy(); } catch { /* noop */ }
       playerRef.current = null;
     }
+    if (hlsRef.current) {
+      try { hlsRef.current.destroy(); } catch { /* noop */ }
+      hlsRef.current = null;
+    }
     if (playerElRef.current) {
-      const v = playerElRef.current.querySelector("video") as any;
-      if (v?._hls) { try { v._hls.destroy(); } catch {} }
+      const v = playerElRef.current.querySelector("video");
+      if (v) { v.pause(); v.src = ""; v.removeAttribute("src"); v.load(); }
+      playerElRef.current.innerHTML = "";
     }
-    if (minuteIntervalRef.current) {
-      window.clearInterval(minuteIntervalRef.current);
-      minuteIntervalRef.current = null;
-    }
-    if (playerElRef.current) playerElRef.current.innerHTML = "";
   }, []);
 
+  // Reset on video change
   useEffect(() => {
     destroyPlayer();
     setState("thumbnail");
     setIsSeeking(false);
+    setErrorMsg("");
     completedRef.current = false;
     lastProgressEmitRef.current = 0;
     watchedSecondsRef.current = 0;
@@ -68,29 +79,28 @@ const VideoPlayer = ({ video, onPlayed, onComplete, onProgress, onMinuteWatched 
     awardedMinuteRef.current = 0;
   }, [video.id, destroyPlayer]);
 
-  useEffect(() => {
-    return () => destroyPlayer();
-  }, [destroyPlayer]);
+  useEffect(() => () => destroyPlayer(), [destroyPlayer]);
 
+  // Plyr event tracking
   const attachPlyrTracking = useCallback((player: Plyr) => {
-    player.on("ready", () => {
+    const onReady = () => {
       setState("playing");
-      try { player.muted = false; player.volume = 1; } catch {}
+      try { player.muted = false; player.volume = 1; } catch { /* noop */ }
       onPlayed?.();
-    });
-    player.on("seeking", () => { setIsSeeking(true); lastTickTsRef.current = null; });
-    player.on("seeked", () => setIsSeeking(false));
-    player.on("waiting", () => setIsSeeking(true));
-    player.on("playing", () => { setIsSeeking(false); lastTickTsRef.current = Date.now(); });
-    player.on("pause", () => { lastTickTsRef.current = null; });
+    };
+    const onSeeking = () => { setIsSeeking(true); lastTickTsRef.current = null; };
+    const onSeeked = () => setIsSeeking(false);
+    const onWaiting = () => setIsSeeking(true);
+    const onPlaying = () => { setIsSeeking(false); lastTickTsRef.current = Date.now(); };
+    const onPause = () => { lastTickTsRef.current = null; };
 
-    player.on("timeupdate", () => {
+    const onTimeUpdate = () => {
       try {
         const dur = player.duration || 0;
         const cur = player.currentTime || 0;
         if (dur <= 0) return;
 
-        if (!player.paused) {
+        if (!player.paused && !player.ended) {
           const now = Date.now();
           if (lastTickTsRef.current != null) {
             const delta = (now - lastTickTsRef.current) / 1000;
@@ -98,8 +108,8 @@ const VideoPlayer = ({ video, onPlayed, onComplete, onProgress, onMinuteWatched 
           }
           lastTickTsRef.current = now;
 
-          const wholeMinutes = Math.floor(watchedSecondsRef.current / 60);
-          while (awardedMinuteRef.current < wholeMinutes) {
+          const wholeMin = Math.floor(watchedSecondsRef.current / 60);
+          while (awardedMinuteRef.current < wholeMin) {
             awardedMinuteRef.current += 1;
             onMinuteWatched?.(awardedMinuteRef.current);
           }
@@ -115,148 +125,257 @@ const VideoPlayer = ({ video, onPlayed, onComplete, onProgress, onMinuteWatched 
           completedRef.current = true;
           onComplete?.();
         }
-      } catch {}
-    });
+      } catch { /* noop */ }
+    };
 
-    player.on("ended", () => {
+    const onEnded = () => {
       lastTickTsRef.current = null;
-      if (!completedRef.current) {
-        completedRef.current = true;
-        onComplete?.();
-      }
-    });
+      if (!completedRef.current) { completedRef.current = true; onComplete?.(); }
+    };
+
+    const onError = () => { setErrorMsg("Failed to load video"); setState("error"); };
+
+    player.on("ready", onReady);
+    player.on("seeking", onSeeking);
+    player.on("seeked", onSeeked);
+    player.on("waiting", onWaiting);
+    player.on("playing", onPlaying);
+    player.on("pause", onPause);
+    player.on("timeupdate", onTimeUpdate);
+    player.on("ended", onEnded);
+    player.on("error", onError);
+
+    return () => {
+      player.off("ready", onReady);
+      player.off("seeking", onSeeking);
+      player.off("seeked", onSeeked);
+      player.off("waiting", onWaiting);
+      player.off("playing", onPlaying);
+      player.off("pause", onPause);
+      player.off("timeupdate", onTimeUpdate);
+      player.off("ended", onEnded);
+      player.off("error", onError);
+    };
   }, [onPlayed, onProgress, onComplete, onMinuteWatched]);
 
+  // Initialize player
   const initPlayer = useCallback(() => {
     if (!playerElRef.current) return;
     playerElRef.current.innerHTML = "";
+    setErrorMsg("");
 
-    // ---- External (zoom/meet/http link) — iframe, no tracking possible ----
-    if (detected.provider === "external") {
-      const iframe = document.createElement("iframe");
-      iframe.src = detected.embedUrl!;
-      iframe.allow = "accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;";
-      iframe.allowFullscreen = true;
-      iframe.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0;";
-      playerElRef.current.appendChild(iframe);
-      setState("playing");
-      onPlayed?.();
+    // Unknown
+    if (detected.provider === "unknown") {
+      setErrorMsg("Unsupported video format");
+      setState("error");
       return;
     }
 
-    // ---- Bunny.net via HLS.js + Plyr (real watch tracking) ----
-    if (detected.provider === "bunny") {
-      const video = document.createElement("video");
-      video.setAttribute("playsinline", "");
-      video.crossOrigin = "anonymous";
-      video.style.cssText = "width:100%;height:100%;";
-      playerElRef.current.appendChild(video);
+    // External iframe
+    if (detected.provider === "external" && detected.embedUrl) {
+      try {
+        const iframe = document.createElement("iframe");
+        iframe.src = detected.embedUrl;
+        iframe.allow = "accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen";
+        iframe.allowFullscreen = true;
+        iframe.referrerPolicy = "strict-origin-when-cross-origin";
+        iframe.loading = "lazy";
+        iframe.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0;";
+        iframe.title = video.title || "External video";
+        iframe.sandbox = "allow-same-origin allow-scripts allow-popups allow-forms";
+        iframe.onload = () => { setState("playing"); onPlayed?.(); };
+        iframe.onerror = () => { setErrorMsg("Failed to load external video"); setState("error"); };
+        playerElRef.current.appendChild(iframe);
+        return;
+      } catch {
+        setErrorMsg("Failed to load video");
+        setState("error");
+      }
+    }
 
-      const src = detected.embedUrl!;
-      const startPlyr = () => {
-        const player = new Plyr(video, {
-          controls: ["play-large","play","progress","current-time","duration","captions","settings","airplay","fullscreen"],
-          autoplay: true, ratio: "16:9", hideControls: true, resetOnEnd: false, muted: false, volume: 1,
+    // YouTube via Plyr
+    if (detected.provider === "youtube" && detected.id) {
+      try {
+        const wrapper = document.createElement("div");
+        wrapper.setAttribute("data-plyr-provider", "youtube");
+        wrapper.setAttribute("data-plyr-embed-id", detected.id);
+        playerElRef.current.appendChild(wrapper);
+
+        const player = new Plyr(wrapper, {
+          controls: ["play-large", "play", "progress", "current-time", "duration", "captions", "settings", "pip", "airplay", "fullscreen"],
+          youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, playsinline: 1 },
+          autoplay: true, ratio: "16:9", hideControls: false, resetOnEnd: false, muted: false, volume: 1,
+          tooltips: { controls: true, seek: true }, keyboard: { focused: true, global: false }, clickToPlay: true,
+          storage: { key: `plyr-yt-${video.id}` },
         });
+
         attachPlyrTracking(player);
         playerRef.current = player;
-      };
-
-      if (Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true });
-        hls.loadSource(src);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, startPlyr);
-        (video as any)._hls = hls;
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src;
-        startPlyr();
-      } else {
-        video.src = src;
-        startPlyr();
+        setTimeout(() => (player as any).emit?.("resize"), 100);
+        return;
+      } catch {
+        setErrorMsg("Failed to load YouTube video");
+        setState("error");
       }
-      return;
     }
 
-    // ---- YouTube via Plyr ----
-    const wrapper = document.createElement("div");
-    wrapper.setAttribute("data-plyr-provider", "youtube");
-    wrapper.setAttribute("data-plyr-embed-id", detected.id);
-    playerElRef.current.appendChild(wrapper);
+    // Bunny.net via HLS.js + Plyr
+    if (detected.provider === "bunny" && detected.embedUrl) {
+      try {
+        const videoEl = document.createElement("video");
+        videoEl.setAttribute("playsinline", "");
+        videoEl.setAttribute("webkit-playsinline", "");
+        videoEl.setAttribute("x5-playsinline", "");
+        videoEl.crossOrigin = "anonymous";
+        videoEl.preload = "metadata";
+        videoEl.style.cssText = "position:absolute;inset:0;width:100%;height:100%;";
+        playerElRef.current.appendChild(videoEl);
 
-    const player = new Plyr(wrapper, {
-      controls: ["play-large","play","progress","current-time","duration","captions","settings","pip","airplay","fullscreen"],
-      youtube: { noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, playsinline: 1 },
-      autoplay: true, ratio: "16:9", hideControls: true, resetOnEnd: false, muted: false, volume: 1,
-    });
-    attachPlyrTracking(player);
-    playerRef.current = player;
-  }, [detected, attachPlyrTracking, onPlayed]);
+        const startPlyr = () => {
+          try {
+            const player = new Plyr(videoEl, {
+              controls: ["play-large", "play", "progress", "current-time", "duration", "captions", "settings", "airplay", "fullscreen"],
+              settings: ["captions", "quality", "speed"],
+              autoplay: true, ratio: "16:9", hideControls: false, resetOnEnd: false,
+              muted: false, volume: 1, invertTime: true,
+              tooltips: { controls: true, seek: true }, keyboard: { focused: true, global: false }, clickToPlay: true,
+              storage: { key: `plyr-bunny-${video.id}` },
+            });
+            attachPlyrTracking(player);
+            playerRef.current = player;
+            setTimeout(() => (player as any).emit?.("resize"), 100);
+          } catch {
+            setErrorMsg("Failed to initialize player");
+            setState("error");
+          }
+        };
+
+        const src = detected.embedUrl;
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true, lowLatencyMode: true, backBufferLength: 30,
+            maxBufferLength: 30, maxMaxBufferLength: 60, testBandwidth: true, progressive: true,
+          });
+          hls.loadSource(src);
+          hls.attachMedia(videoEl);
+          hls.on(Hls.Events.MANIFEST_PARSED, startPlyr);
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (data.fatal) {
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+              else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+              else { setErrorMsg("Failed to load video stream"); setState("error"); }
+            }
+          });
+          hlsRef.current = hls;
+        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+          videoEl.src = src;
+          videoEl.addEventListener("loadedmetadata", startPlyr, { once: true });
+          videoEl.addEventListener("error", () => { setErrorMsg("Failed to load video"); setState("error"); });
+        } else {
+          setErrorMsg("Your browser doesn't support HLS video");
+          setState("error");
+        }
+        return;
+      } catch {
+        setErrorMsg("Failed to load Bunny video");
+        setState("error");
+      }
+    }
+
+    setErrorMsg("Unsupported video provider");
+    setState("error");
+  }, [detected, attachPlyrTracking, onPlayed, video.id, video.title]);
 
   const handlePlay = useCallback(() => {
+    if (state !== "thumbnail") return;
     setState("loading");
-    setTimeout(() => {
-      initPlayer();
-    }, 300);
-  }, [initPlayer]);
+    setTimeout(() => initPlayer(), 150);
+  }, [state, initPlayer]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handlePlay(); }
+  }, [handlePlay]);
+
+  const handleRetry = useCallback(() => { setErrorMsg(""); setState("thumbnail"); }, []);
+
+  const thumbnailStyle = useMemo<React.CSSProperties>(() => {
+    if (!thumbnail) return {};
+    return { backgroundImage: `url(${thumbnail})`, backgroundSize: "cover", backgroundPosition: "center" };
+  }, [thumbnail]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-player overflow-hidden">
-      {/* Thumbnail + Play Button */}
-      {state === "thumbnail" && (
-        <div
-          className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer group"
-          style={{
-            backgroundImage: `url(${video.thumbnail})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
+    <div
+      ref={containerRef}
+      className="relative w-full h-full bg-black overflow-hidden"
+      role="region"
+      aria-label={`Video player: ${video.title}`}
+    >
+      {/* Thumbnail */}
+      {state === "thumbnail" && thumbnail && (
+        <button
+          type="button"
+          className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60"
+          style={thumbnailStyle}
           onClick={handlePlay}
+          onKeyDown={handleKeyDown}
+          aria-label={`Play video: ${video.title}`}
         >
-          <div className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-all duration-300" />
-          <div className="relative z-10 w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 lg:w-[68px] lg:h-[68px] rounded-full bg-accent/90 group-hover:bg-accent flex items-center justify-center shadow-lg shadow-accent/40 group-hover:shadow-accent/60 group-hover:scale-110 transition-all duration-300">
-            <Play className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-accent-foreground ml-0.5 fill-current" />
+          <div className="absolute inset-0 bg-black/25 group-hover:bg-black/45 transition-colors duration-200" />
+          <div className="relative z-10 w-14 h-14 sm:w-[72px] sm:h-[72px] rounded-full bg-white/95 hover:bg-white flex items-center justify-center shadow-xl shadow-black/30 group-hover:scale-105 active:scale-95 transition-transform duration-150">
+            <Play className="w-6 h-6 sm:w-7 sm:h-7 text-black fill-current ml-0.5" />
           </div>
-        </div>
-      )}
-
-      {/* Loading State with thumbnail background */}
-      {state === "loading" && (
-        <div
-          className="absolute inset-0 z-20 flex items-center justify-center"
-          style={{
-            backgroundImage: `url(${video.thumbnail})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative z-10 flex flex-col items-center gap-2.5">
-            <Loader2 className="w-9 h-9 sm:w-10 sm:h-10 md:w-12 md:h-12 text-accent animate-spin" />
-            <span className="text-[11px] sm:text-xs md:text-sm font-semibold text-foreground/90 tracking-wider uppercase">
-              Loading...
+          {video.duration && (
+            <span className="absolute bottom-2.5 right-2.5 z-10 px-2 py-0.5 text-[11px] font-medium bg-black/75 text-white rounded-md backdrop-blur-sm tabular-nums">
+              {video.duration}
             </span>
+          )}
+        </button>
+      )}
+
+      {/* Loading */}
+      {state === "loading" && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center" style={thumbnail ? thumbnailStyle : {}}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative z-10 flex flex-col items-center gap-3">
+            <Loader2 className="w-10 h-10 sm:w-12 sm:h-12 text-white animate-spin" />
+            <span className="text-xs sm:text-sm font-medium text-white/90 tracking-wide">Loading...</span>
           </div>
         </div>
       )}
 
-      {/* Seeking/Buffering overlay on top of playing video */}
+      {/* Error */}
+      {state === "error" && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center p-6" style={thumbnail ? thumbnailStyle : {}}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative z-10 flex flex-col items-center gap-3 text-center max-w-[280px]">
+            <AlertCircle className="w-9 h-9 text-red-400" />
+            <p className="text-sm text-white/90 leading-relaxed">{errorMsg || "Failed to load video"}</p>
+            <button
+              onClick={handleRetry}
+              className="px-4 py-2 text-sm font-medium bg-white/95 hover:bg-white text-black rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Buffering overlay */}
       {state === "playing" && isSeeking && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
-          <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute inset-0 bg-black/20" />
           <div className="relative z-10 flex flex-col items-center gap-2">
-            <Loader2 className="w-9 h-9 sm:w-10 sm:h-10 text-accent animate-spin" />
-            <span className="text-[10px] sm:text-xs font-semibold text-foreground/80 tracking-wider uppercase">
-              Buffering...
-            </span>
+            <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 text-white animate-spin" />
           </div>
         </div>
       )}
 
-      {/* Plyr Player Container */}
+      {/* Plyr mount point */}
       <div
         ref={playerElRef}
-        className={`absolute inset-0 z-30 plyr-container ${state === "playing" ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`plyr-container absolute inset-0 z-30 transition-opacity duration-200 ${
+          state === "playing" ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
       />
     </div>
   );

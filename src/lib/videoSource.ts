@@ -7,29 +7,28 @@ export interface DetectedVideo {
   provider: VideoProvider;
   /** Normalised id (YouTube id, Bunny uuid, or original string for external). */
   id: string;
-  /** Embed URL (for bunny/external iframes). */
+  /** Embed URL (for bunny/external iframes or HLS playlist). */
   embedUrl?: string;
   /** Default thumbnail URL. */
   thumbnail: string;
 }
 
-// Bunny config — override via VITE_BUNNY_LIBRARY_ID / VITE_BUNNY_CDN_HOSTNAME.
-export const BUNNY_LIBRARY_ID =
-  (import.meta as any).env?.VITE_BUNNY_LIBRARY_ID || "654345";
+// ✅ Bunny config — ONLY VITE_BUNNY_CDN_HOSTNAME required
+// Example: "vz-3cf84610-3c6" → builds: https://vz-3cf84610-3c6.b-cdn.net/{uuid}/playlist.m3u8
 export const BUNNY_CDN_HOSTNAME =
   (import.meta as any).env?.VITE_BUNNY_CDN_HOSTNAME || "vz-3cf84610-3c6";
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 export function detectVideo(rawId: string | null | undefined): DetectedVideo {
   const id = (rawId || "").trim();
+  
   if (!id) {
     return { provider: "unknown", id: "", thumbnail: "/placeholder.svg" };
   }
 
-  // Live / external URL (zoom, meet, teams, http(s) link)
+  // ── External URL (zoom, meet, teams, http/https link) ──
   if (/^https?:\/\//i.test(id)) {
     return {
       provider: "external",
@@ -39,8 +38,7 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     };
   }
 
-  // Bunny.net stream — UUID. We play the HLS playlist directly (not the
-  // iframe) so we can track real watch time client-side.
+  // ── Bunny.net stream (UUID format) ──
   if (UUID_RE.test(id)) {
     return {
       provider: "bunny",
@@ -50,7 +48,7 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     };
   }
 
-  // YouTube — 11-char id
+  // ── YouTube (exact 11-char ID) ──
   if (YT_ID_RE.test(id)) {
     return {
       provider: "youtube",
@@ -59,10 +57,9 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     };
   }
 
-  // Try to extract YouTube id from a pasted URL like watch?v=... or youtu.be/
-  const ytMatch =
-    id.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
-  if (ytMatch) {
+  // ── YouTube URL extraction ──
+  const ytMatch = id.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+  if (ytMatch?.[1]) {
     const yid = ytMatch[1];
     return {
       provider: "youtube",
@@ -71,5 +68,6 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     };
   }
 
+  // ── Fallback ──
   return { provider: "unknown", id, thumbnail: "/placeholder.svg" };
 }
