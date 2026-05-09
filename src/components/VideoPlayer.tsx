@@ -22,22 +22,22 @@ interface VideoPlayerProps {
   onMinuteWatched?: (minute: number) => void;
 }
 
-const VideoPlayer = ({
+export default function VideoPlayer({
   video,
   onPlayed,
   onComplete,
   onProgress,
   onMinuteWatched,
-}: VideoPlayerProps) => {
+}: VideoPlayerProps) {
   const detected = useMemo<DetectedVideo>(() => detectVideo(video.id), [video.id]);
-  const thumbnail = video.thumbnail || detected.thumbnail;
+  const thumbnailSrc = video.thumbnail || detected.thumbnail;
 
   const [state, setState] = useState<"thumbnail" | "loading" | "playing" | "error">("thumbnail");
   const [isSeeking, setIsSeeking] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [thumbFailed, setThumbFailed] = useState(false);
 
   const playerRef = useRef<Plyr | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const playerElRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,7 +49,6 @@ const VideoPlayer = ({
   const awardedMinuteRef = useRef(0);
   const playedFiredRef = useRef(false);
 
-  /* ─── Safety timeout helpers ─── */
   const clearSafetyTimer = useCallback(() => {
     if (safetyTimerRef.current) {
       clearTimeout(safetyTimerRef.current);
@@ -65,10 +64,9 @@ const VideoPlayer = ({
         playedFiredRef.current = true;
         onPlayed?.();
       }
-    }, 4000);
+    }, 5000);
   }, [clearSafetyTimer, onPlayed]);
 
-  /* ─── Centralised "mark as playing" ─── */
   const markAsPlaying = useCallback(
     (player?: Plyr | null) => {
       clearSafetyTimer();
@@ -86,10 +84,9 @@ const VideoPlayer = ({
         onPlayed?.();
       }
     },
-    [clearSafetyTimer, onPlayed],
+    [clearSafetyTimer, onPlayed]
   );
 
-  /* ─── Destroy ─── */
   const destroyPlayer = useCallback(() => {
     clearSafetyTimer();
     if (playerRef.current) {
@@ -121,12 +118,12 @@ const VideoPlayer = ({
     playedFiredRef.current = false;
   }, [clearSafetyTimer]);
 
-  /* ─── Reset on video change ─── */
   useEffect(() => {
     destroyPlayer();
     setState("thumbnail");
     setIsSeeking(false);
     setErrorMsg("");
+    setThumbFailed(false);
     completedRef.current = false;
     lastProgressEmitRef.current = 0;
     watchedSecondsRef.current = 0;
@@ -136,7 +133,6 @@ const VideoPlayer = ({
 
   useEffect(() => () => destroyPlayer(), [destroyPlayer]);
 
-  /* ─── Plyr event tracking (no ready handler — handled outside) ─── */
   const attachPlyrTracking = useCallback(
     (player: Plyr) => {
       const onSeeking = () => {
@@ -222,39 +218,31 @@ const VideoPlayer = ({
         player.off("error", onError);
       };
     },
-    [onProgress, onComplete, onMinuteWatched],
+    [onProgress, onComplete, onMinuteWatched]
   );
 
-  /* ─── Wire up ready + tracking together ─── */
   const wirePlayer = useCallback(
     (player: Plyr) => {
       const onReady = () => markAsPlaying(player);
-
-      // *** KEY FIX: check if ready already fired (mobile race condition) ***
       try {
         if ((player as any).ready) onReady();
       } catch {
         /* noop */
       }
       player.on("ready", onReady);
-
       const cleanupTracking = attachPlyrTracking(player);
-
       return () => {
         player.off("ready", onReady);
         cleanupTracking();
       };
     },
-    [markAsPlaying, attachPlyrTracking],
+    [markAsPlaying, attachPlyrTracking]
   );
 
-  /* ─── Init player ─── */
   const initPlayer = useCallback(async () => {
     if (!playerElRef.current) return;
     playerElRef.current.innerHTML = "";
     setErrorMsg("");
-
-    // Start safety net timer — forces playing if nothing else does
     startSafetyTimer();
 
     if (detected.provider === "unknown") {
@@ -263,7 +251,7 @@ const VideoPlayer = ({
       return;
     }
 
-    /* ── External embed ── */
+    /* ── EXTERNAL ── */
     if (detected.provider === "external" && detected.embedUrl) {
       try {
         const iframe = document.createElement("iframe");
@@ -291,7 +279,7 @@ const VideoPlayer = ({
       return;
     }
 
-    /* ── YouTube ── */
+    /* ── YOUTUBE ── */
     if (detected.provider === "youtube" && detected.id) {
       try {
         const wrapper = document.createElement("div");
@@ -301,40 +289,18 @@ const VideoPlayer = ({
 
         const player = new Plyr(wrapper, {
           controls: [
-            "play-large",
-            "play",
-            "progress",
-            "current-time",
-            "duration",
-            "captions",
-            "settings",
-            "pip",
-            "airplay",
-            "fullscreen",
+            "play-large", "play", "progress", "current-time", "duration",
+            "captions", "settings", "pip", "airplay", "fullscreen",
           ],
           youtube: {
-            noCookie: true,
-            rel: 0,
-            showinfo: 0,
-            iv_load_policy: 3,
-            modestbranding: 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            playsinline: 1,
+            noCookie: true, rel: 0, showinfo: 0, iv_load_policy: 3,
+            modestbranding: 1, controls: 0, disablekb: 1, fs: 0, playsinline: 1,
           },
-          autoplay: true,
-          ratio: "16:9",
-          hideControls: false,
-          resetOnEnd: false,
-          muted: false,
-          volume: 1,
-          tooltips: { controls: true, seek: true },
-          keyboard: { focused: true, global: false },
-          clickToPlay: true,
+          autoplay: true, ratio: "16:9", hideControls: false, resetOnEnd: false,
+          muted: false, volume: 1, tooltips: { controls: true, seek: true },
+          keyboard: { focused: true, global: false }, clickToPlay: true,
           storage: { key: `plyr-yt-${video.id}` },
         });
-
         wirePlayer(player);
         playerRef.current = player;
         setTimeout(() => {
@@ -351,7 +317,7 @@ const VideoPlayer = ({
       return;
     }
 
-    /* ── Bunny HLS ── */
+    /* ── BUNNY HLS ── */
     if (detected.provider === "bunny") {
       try {
         let src = detected.embedUrl;
@@ -377,11 +343,22 @@ const VideoPlayer = ({
           src = data.secureUrl;
         }
 
+        // PRODUCTION FIX: Extract token to inject into .ts video chunks
+        let tokenParam = "";
+        let expiresParam = "";
+        try {
+          const urlObj = new URL(src);
+          tokenParam = urlObj.searchParams.get("token") || "";
+          expiresParam = urlObj.searchParams.get("expires") || "";
+        } catch {
+          /* noop */
+        }
+
         const videoEl = document.createElement("video");
         videoEl.setAttribute("playsinline", "");
         videoEl.setAttribute("webkit-playsinline", "");
         videoEl.setAttribute("x5-playsinline", "");
-        videoEl.preload = "auto"; // was "metadata" — "auto" lets browser fetch sooner
+        videoEl.preload = "auto";
         videoEl.style.cssText =
           "position:absolute;inset:0;width:100%;height:100%;";
         playerElRef.current.appendChild(videoEl);
@@ -390,30 +367,16 @@ const VideoPlayer = ({
           try {
             const player = new Plyr(videoEl, {
               controls: [
-                "play-large",
-                "play",
-                "progress",
-                "current-time",
-                "duration",
-                "captions",
-                "settings",
-                "airplay",
-                "fullscreen",
+                "play-large", "play", "progress", "current-time", "duration",
+                "captions", "settings", "airplay", "fullscreen",
               ],
               settings: ["captions", "quality", "speed"],
-              autoplay: true,
-              ratio: "16:9",
-              hideControls: false,
-              resetOnEnd: false,
-              muted: false,
-              volume: 1,
-              invertTime: true,
+              autoplay: true, ratio: "16:9", hideControls: false, resetOnEnd: false,
+              muted: false, volume: 1, invertTime: true,
               tooltips: { controls: true, seek: true },
-              keyboard: { focused: true, global: false },
-              clickToPlay: true,
+              keyboard: { focused: true, global: false }, clickToPlay: true,
               storage: { key: `plyr-bunny-${video.id}` },
             });
-
             wirePlayer(player);
             playerRef.current = player;
             setTimeout(() => {
@@ -436,46 +399,69 @@ const VideoPlayer = ({
             backBufferLength: 30,
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
-            testBandwidth: false, // skip bandwidth probe → faster first frame on mobile
+            testBandwidth: false,
             progressive: true,
             startLevel: -1,
-            abrEwmaDefaultEstimate: 500000, // assume 500 kbps → pick lower quality fast
-            manifestLoadingTimeOut: 10000,
-            manifestLoadingMaxRetry: 3,
-            levelLoadingTimeOut: 10000,
-            levelLoadingMaxRetry: 3,
-            fragLoadingTimeOut: 20000,
-            fragLoadingMaxRetry: 3,
+            abrEwmaDefaultEstimate: 500000,
+            // CRITICAL FOR PRODUCTION: Forces token onto every .ts segment request
+            xhrSetup: (xhr, requestUrl) => {
+              if (tokenParam && !requestUrl.includes("token=")) {
+                const sep = requestUrl.includes("?") ? "&" : "?";
+                xhr.open(
+                  "GET",
+                  `${requestUrl}${sep}token=${tokenParam}&expires=${expiresParam}`,
+                  true
+                );
+              }
+            },
           });
+
           hls.loadSource(src);
           hls.attachMedia(videoEl);
           hls.on(Hls.Events.MANIFEST_PARSED, bootPlyr);
+
           hls.on(Hls.Events.ERROR, (_, data) => {
             if (data.fatal) {
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-              else if (data.type === Hls.ErrorTypes.MEDIA_ERROR)
+              // Catch 403 specifically for better UX
+              const statusCode =
+                data.response?.code || (data.context as any)?.response?.code;
+              if (statusCode === 403) {
+                setErrorMsg(
+                  "Access denied. Video link may be expired or your CDN domain settings need updating."
+                );
+                setState("error");
+                return;
+              }
+
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad();
+              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 hls.recoverMediaError();
-              else {
+              } else {
                 setErrorMsg("Failed to load video stream");
                 setState("error");
               }
             }
           });
           hlsRef.current = hls;
-        } else if (
-          videoEl.canPlayType("application/vnd.apple.mpegurl")
-        ) {
+        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
           // Native HLS (Safari / iOS)
           videoEl.src = src;
-
-          // *** FIX: readyState may already be ≥ 1 from a cached response ***
           if (videoEl.readyState >= 1) {
             bootPlyr();
           } else {
             videoEl.addEventListener("loadedmetadata", bootPlyr, { once: true });
           }
+
           videoEl.addEventListener("error", () => {
-            setErrorMsg("Failed to load video");
+            const mediaErr = videoEl.error;
+            let msg = "Failed to load video";
+            if (mediaErr?.message?.includes("403")) {
+              msg = "Access denied. Video link may be expired.";
+            } else if (mediaErr?.code === MediaError.MEDIA_ERR_NETWORK) {
+              msg = "Network error. Check your connection.";
+            }
+            setErrorMsg(msg);
             setState("error");
           });
         } else {
@@ -493,7 +479,6 @@ const VideoPlayer = ({
     setState("error");
   }, [detected, wirePlayer, startSafetyTimer, video.id, video.title]);
 
-  /* ─── User actions ─── */
   const handlePlay = useCallback(() => {
     if (state !== "thumbnail") return;
     setState("loading");
@@ -507,7 +492,7 @@ const VideoPlayer = ({
         handlePlay();
       }
     },
-    [handlePlay],
+    [handlePlay]
   );
 
   const handleRetry = useCallback(() => {
@@ -515,28 +500,29 @@ const VideoPlayer = ({
     setState("thumbnail");
   }, []);
 
-  const thumbnailStyle = useMemo<React.CSSProperties>(() => {
-    if (!thumbnail) return {};
-    return {
-      backgroundImage: `url(${thumbnail})`,
-      backgroundSize: "cover",
-      backgroundPosition: "center",
-    };
-  }, [thumbnail]);
+  const activeThumb = thumbFailed ? "/placeholder.svg" : thumbnailSrc;
 
   return (
     <div
-      ref={containerRef}
       className="relative w-full h-full bg-black overflow-hidden"
       role="region"
       aria-label={`Video player: ${video.title}`}
     >
-      {/* Ghost thumbnail – stays visible during loading to prevent black flash */}
-      {(state === "thumbnail" || state === "loading") && thumbnail && (
-        <div className="absolute inset-0 z-10" style={thumbnailStyle} />
+      {/* THUMBNAIL - uses <img> so it never silently fails to black */}
+      {(state === "thumbnail" || state === "loading") && (
+        <div className="absolute inset-0 z-10 bg-neutral-900">
+          <img
+            src={activeThumb}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setThumbFailed(true)}
+            loading="eager"
+            fetchPriority="high"
+          />
+        </div>
       )}
 
-      {/* Play button – only on initial thumbnail */}
+      {/* PLAY BUTTON */}
       {state === "thumbnail" && (
         <button
           type="button"
@@ -557,7 +543,7 @@ const VideoPlayer = ({
         </button>
       )}
 
-      {/* Loading spinner */}
+      {/* LOADING SPINNER */}
       {state === "loading" && (
         <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
           <div className="absolute inset-0 bg-black/30" />
@@ -572,14 +558,19 @@ const VideoPlayer = ({
         </div>
       )}
 
-      {/* Error overlay */}
+      {/* ERROR OVERLAY */}
       {state === "error" && (
-        <div
-          className="absolute inset-0 z-20 flex items-center justify-center p-6"
-          style={thumbnail ? thumbnailStyle : {}}
-        >
+        <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-neutral-900">
+            <img
+              src={activeThumb}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover opacity-30"
+              onError={() => setThumbFailed(true)}
+            />
+          </div>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-          <div className="relative z-10 flex flex-col items-center gap-3 text-center max-w-[280px]">
+          <div className="relative z-10 flex flex-col items-center gap-3 text-center max-w-[300px]">
             <AlertCircle className="w-9 h-9 text-red-400" />
             <p className="text-sm text-white/90 leading-relaxed">
               {errorMsg || "Failed to load video"}
@@ -594,17 +585,15 @@ const VideoPlayer = ({
         </div>
       )}
 
-      {/* Buffering overlay during playback */}
+      {/* BUFFERING OVERLAY (DURING PLAYBACK) */}
       {state === "playing" && isSeeking && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
           <div className="absolute inset-0 bg-black/20" />
-          <div className="relative z-10 flex flex-col items-center gap-2">
-            <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 text-white animate-spin" />
-          </div>
+          <Loader2 className="relative z-10 w-8 h-8 sm:w-10 sm:h-10 text-white animate-spin" />
         </div>
       )}
 
-      {/* Plyr mount point */}
+      {/* PLYR MOUNT POINT */}
       <div
         ref={playerElRef}
         className={`plyr-container absolute inset-0 z-30 ${
@@ -613,6 +602,4 @@ const VideoPlayer = ({
       />
     </div>
   );
-};
-
-export default VideoPlayer;
+}

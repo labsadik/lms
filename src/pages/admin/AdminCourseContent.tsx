@@ -279,7 +279,7 @@ const AdminCourseContent = () => {
               <div>
                 <Label>Video ID</Label>
                 <Input value={partForm.video_id} onChange={(e) => setPartForm({ ...partForm, video_id: e.target.value.trim() })} placeholder="YouTube id or Bunny UUID" maxLength={64} />
-                <p className="text-[10px] text-muted-foreground mt-1">Auto-detects YouTube (11 chars) vs Bunny.net (UUID).</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Add video ID</p>
               </div>
             ) : (
               <div>
