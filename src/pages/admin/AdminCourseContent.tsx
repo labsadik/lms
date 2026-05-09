@@ -66,6 +66,14 @@ const AdminCourseContent = () => {
     });
   };
 
+  // Keyboard handler for div-based accordion triggers
+  const handleAccordionKeyDown = (e: React.KeyboardEvent, toggleFn: () => void) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleFn();
+    }
+  };
+
   // Create Functions
   const addSubject = async () => {
     if (!subjectName.trim()) { toast.error('Subject name is required'); return; }
@@ -131,7 +139,7 @@ const AdminCourseContent = () => {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Fixed Header - Prevents full page scroll, stays at top */}
+      {/* Fixed Header */}
       <header className="shrink-0 px-4 sm:px-6 py-4 border-b border-border bg-background z-10">
         <div className="flex justify-between items-center gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -145,7 +153,7 @@ const AdminCourseContent = () => {
         </div>
       </header>
 
-      {/* Scrollable Content Area - Only this part scrolls */}
+      {/* Scrollable Content Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-muted/30">
         <div className="space-y-3 max-w-4xl mx-auto">
           {tree.length === 0 && (
@@ -159,10 +167,13 @@ const AdminCourseContent = () => {
 
           {tree.map((s: any) => (
             <Card key={s.id} className="bg-card border-border overflow-hidden">
-              {/* Subject Header (Clickable Accordion) */}
-              <button 
-                onClick={() => toggleSubject(s.id)} 
-                className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-secondary/30 transition-colors text-left"
+              {/* Subject Header — div instead of button to avoid nesting <button> inside <button> */}
+              <div 
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleSubject(s.id)}
+                onKeyDown={(e) => handleAccordionKeyDown(e, () => toggleSubject(s.id))}
+                className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-secondary/30 transition-colors text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   {openSubjects.has(s.id) ? <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />}
@@ -174,7 +185,7 @@ const AdminCourseContent = () => {
                   <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setChapterDialog({ open: true, subjectId: s.id }); setChapterName(''); }}><Plus className="w-3 h-3" /> Chapter</Button>
                   <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => del('subjects', s.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
                 </div>
-              </button>
+              </div>
 
               {/* Subject Body (Collapsible) */}
               {openSubjects.has(s.id) && (
@@ -183,10 +194,13 @@ const AdminCourseContent = () => {
                   
                   {s.chapters.map((ch: any) => (
                     <div key={ch.id} className="border border-border rounded-md bg-card overflow-hidden">
-                      {/* Chapter Header (Clickable Accordion) */}
-                      <button 
-                        onClick={() => toggleChapter(ch.id)} 
-                        className="w-full flex items-center justify-between p-2.5 pl-4 hover:bg-secondary/30 transition-colors text-left border-l-2 border-primary/30"
+                      {/* Chapter Header — div instead of button to avoid nesting */}
+                      <div 
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleChapter(ch.id)}
+                        onKeyDown={(e) => handleAccordionKeyDown(e, () => toggleChapter(ch.id))}
+                        className="w-full flex items-center justify-between p-2.5 pl-4 hover:bg-secondary/30 transition-colors text-left border-l-2 border-primary/30 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           {openChapters.has(ch.id) ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
@@ -197,7 +211,7 @@ const AdminCourseContent = () => {
                           <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={() => openPart(ch.id, ch.parts.length)}><Plus className="w-3 h-3" /> Lecture</Button>
                           <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={() => del('chapters', ch.id)}><Trash2 className="w-3 h-3" /></Button>
                         </div>
-                      </button>
+                      </div>
 
                       {/* Chapter Body / Parts List (Collapsible) */}
                       {openChapters.has(ch.id) && (
