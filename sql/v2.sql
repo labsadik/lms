@@ -20,9 +20,8 @@ DO $$ BEGIN CREATE TYPE public.discount_type AS ENUM ('percent','fixed');       
 -- 2. UTILITY FUNCTIONS
 -- =====================================================================
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
-RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
-BEGIN NEW.updated_at = now(); RETURN NEW; END;
-$$;
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$ BEGIN NEW.updated_at = now(); RETURN NEW; END;
+ $$;
 
 -- =====================================================================
 -- 3. TABLES
@@ -264,24 +263,16 @@ CREATE TABLE IF NOT EXISTS public.referrals (
 );
 
 -- 3.20 coin_ledger ---------------------------------------------------
--- Gamification rules:
---   * Recorded video: +1 XP / +1 coin per *watched* minute (idempotent via
---     ref_id = '{part_id}:m{minute}'). NO bonus for "completion" or
---     "enrollment" — only actual watch time counts.
---   * Test attempt:    +5 coins per correct, -5 per wrong, 0 per skipped
---     (ref_id = attempt_id, source = 'test_attempt'). XP = max(0, net coins).
---   * One ledger row per event. Per-course leaderboards aggregate by course_id.
 CREATE TABLE IF NOT EXISTS public.coin_ledger (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    uuid NOT NULL,
-  source     text NOT NULL,    -- 'video' | 'test_attempt' | 'reward' | etc.
-  ref_id     text,             -- video: '{part_id}:m{minute}'; test: attempt_id
+  source     text NOT NULL,
+  ref_id     text,
   course_id  uuid REFERENCES public.courses(id) ON DELETE SET NULL,
   xp         integer NOT NULL DEFAULT 0,
   coins      integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now()
 );
--- Idempotency guard for per-minute video awards
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_ledger_video_minute
   ON public.coin_ledger(user_id, source, ref_id)
   WHERE source = 'video';
@@ -315,6 +306,20 @@ CREATE TABLE IF NOT EXISTS public.announcement_reads (
   UNIQUE (user_id, announcement_id)
 );
 
+-- 3.23 comments ------------------------------------------------------
+-- Replaces old live_chat_messages. 
+-- Supports threaded replies via parent_id for recorded video parts.
+CREATE TABLE IF NOT EXISTS public.comments (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  part_id      uuid NOT NULL REFERENCES public.parts(id) ON DELETE CASCADE,
+  user_id      uuid NOT NULL,
+  parent_id    uuid REFERENCES public.comments(id) ON DELETE CASCADE, -- NULL for top-level, UUID for replies
+  display_name text,         -- Denormalized for instant UI rendering
+  avatar_url   text,         -- Denormalized for instant UI rendering
+  message      text NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
 -- =====================================================================
 -- 4. INDEXES
 -- =====================================================================
@@ -328,6 +333,10 @@ CREATE INDEX IF NOT EXISTS idx_attempts_user     ON public.test_attempts(user_id
 CREATE INDEX IF NOT EXISTS idx_attempts_test     ON public.test_attempts(test_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_user       ON public.coin_ledger(user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_course     ON public.coin_ledger(course_id);
+
+-- Comments indexes (fast sorting by time, fast lookup for replies)
+CREATE INDEX IF NOT EXISTS idx_comments_part_created ON public.comments(part_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_comments_parent       ON public.comments(parent_id) WHERE parent_id IS NOT NULL;
 
 -- =====================================================================
 -- 5. TIMESTAMP TRIGGERS
@@ -344,21 +353,63 @@ CREATE TRIGGER trg_courses_updated BEFORE UPDATE ON public.courses
 -- 6. SECURITY-DEFINER HELPER FUNCTIONS  (avoid RLS recursion)
 -- =====================================================================
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id AND role = _role)
-$$;
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$   SELECT EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id AND role = _role)
+ $$;
 
 CREATE OR REPLACE FUNCTION public.is_enrolled(_user_id uuid, _course_id uuid)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.enrollments WHERE user_id = _user_id AND course_id = _course_id)
-$$;
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$   SELECT EXISTS (SELECT 1 FROM public.enrollments WHERE user_id = _user_id AND course_id = _course_id)
+ $$;
+
+-- ---------------------------------------------------------------------
+-- 6.1 LEADERBOARD AGGREGATOR
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_leaderboard(_course_id uuid DEFAULT NULL)
+RETURNS TABLE (
+  user_id uuid,
+  display_name text,
+  avatar_url text,
+  level integer,
+  xp bigint,
+  coins bigint,
+  videos bigint,
+  tests bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$   WITH user_stats AS (
+    SELECT 
+      user_id,
+      SUM(xp)::bigint AS sum_xp,
+      SUM(coins)::bigint AS sum_coins,
+      COUNT(*) FILTER (WHERE source = 'video')::bigint AS vid_count,
+      COUNT(*) FILTER (WHERE source = 'test_attempt')::bigint AS test_count
+    FROM public.coin_ledger
+    WHERE _course_id IS NULL OR course_id = _course_id
+    GROUP BY user_id
+  )
+  SELECT
+    p.user_id,
+    p.display_name,
+    p.avatar_url,
+    COALESCE(p.level, 1)::integer AS level,
+    CASE WHEN _course_id IS NULL THEN p.xp::bigint ELSE COALESCE(s.sum_xp, 0)::bigint END AS xp,
+    CASE WHEN _course_id IS NULL THEN p.coins::bigint ELSE COALESCE(s.sum_coins, 0)::bigint END AS coins,
+    COALESCE(s.vid_count, 0)::bigint AS videos,
+    COALESCE(s.test_count, 0)::bigint AS tests
+  FROM public.profiles p
+  LEFT JOIN user_stats s ON s.user_id = p.user_id
+  WHERE 
+    (_course_id IS NULL AND (p.xp > 0 OR p.coins > 0)) OR 
+    (_course_id IS NOT NULL AND (COALESCE(s.sum_xp, 0) > 0 OR COALESCE(s.sum_coins, 0) > 0))
+  ORDER BY 
+    CASE WHEN _course_id IS NULL THEN p.xp ELSE COALESCE(s.sum_xp, 0) END DESC,
+    CASE WHEN _course_id IS NULL THEN p.coins ELSE COALESCE(s.sum_coins, 0) END DESC
+  LIMIT 100;
+ $$;
 
 -- =====================================================================
 -- 7. NEW-USER TRIGGER (creates profile + role + referral on signup)
 -- =====================================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ DECLARE
   ref_code      text;
   referrer_uuid uuid;
 BEGIN
@@ -386,7 +437,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$;
+ $$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -420,6 +471,7 @@ ALTER TABLE public.coin_ledger           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_log          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcement_reads    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments              ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================================
 -- 9. RLS POLICIES
@@ -597,6 +649,10 @@ CREATE POLICY "Admins manage badges" ON public.badges FOR ALL
 
 DROP POLICY IF EXISTS "User badges public read" ON public.user_badges;
 CREATE POLICY "User badges public read" ON public.user_badges FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "System can award badges" ON public.user_badges;
+CREATE POLICY "System can award badges" ON public.user_badges FOR INSERT WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Admins manage user badges" ON public.user_badges;
 CREATE POLICY "Admins manage user badges" ON public.user_badges FOR ALL
   USING (public.has_role(auth.uid(),'admin')) WITH CHECK (public.has_role(auth.uid(),'admin'));
@@ -639,6 +695,22 @@ CREATE POLICY "Users view own reads" ON public.announcement_reads FOR SELECT USI
 DROP POLICY IF EXISTS "Users insert own reads" ON public.announcement_reads;
 CREATE POLICY "Users insert own reads" ON public.announcement_reads FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+-- comments ----------------------------------------------------------
+-- Enrolled users can read comments ONLY if they are enrolled in the course this part belongs to
+DROP POLICY IF EXISTS "Enrolled users can read comments" ON public.comments;
+CREATE POLICY "Enrolled users can read comments" ON public.comments FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.parts p
+    JOIN public.chapters ch ON ch.id = p.chapter_id
+    JOIN public.subjects s ON s.id = ch.subject_id
+    WHERE p.id = part_id AND public.is_enrolled(auth.uid(), s.course_id)
+  )
+);
+
+-- Users can insert their own comments
+DROP POLICY IF EXISTS "Users can insert own comments" ON public.comments;
+CREATE POLICY "Users can insert own comments" ON public.comments FOR INSERT WITH CHECK (auth.uid() = user_id);
+
 -- =====================================================================
 -- 10. STORAGE BUCKETS
 -- =====================================================================
@@ -659,19 +731,24 @@ CREATE POLICY "Users update own avatar" ON storage.objects FOR UPDATE USING (
 );
 
 -- =====================================================================
--- 11. REALTIME — needed for live coin/XP updates in the Rewards UI
+-- 11. REALTIME
 -- =====================================================================
 ALTER TABLE public.profiles    REPLICA IDENTITY FULL;
 ALTER TABLE public.coin_ledger REPLICA IDENTITY FULL;
+ALTER TABLE public.comments    REPLICA IDENTITY FULL;
+
 DO $$ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.coin_ledger;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- =====================================================================
--- 12. SEED DATA — coin-discount rewards
+-- 12. SEED DATA — coin-discount rewards & badges
 -- =====================================================================
 INSERT INTO public.rewards (name, description, cost_coins, reward_type, reward_value, icon, is_active) VALUES
 ('5% Off Coupon',  'Get 5% off any course. One-time use per user.',  100,'discount','5', '🎟️', true),
@@ -679,7 +756,44 @@ INSERT INTO public.rewards (name, description, cost_coins, reward_type, reward_v
 ('15% Off Coupon', 'Get 15% off any course. One-time use per user.',1000,'discount','15','🏷️', true)
 ON CONFLICT DO NOTHING;
 
+INSERT INTO public.badges (code, name, description, icon, xp_reward, coin_reward) VALUES
+('first_video', 'First Steps', 'Watched your very first minute of a video!', '🎬', 10, 5)
+ON CONFLICT (code) DO NOTHING;
+
+-- =====================================================================
+-- 13. GAMIFICATION TRIGGERS — Automatic Badge Awards
+-- =====================================================================
+CREATE OR REPLACE FUNCTION public.handle_badge_awards()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ DECLARE
+  v_badge_id uuid;
+  v_video_count integer;
+BEGIN
+  IF NEW.source = 'video' THEN
+    SELECT COUNT(*) INTO v_video_count 
+    FROM public.coin_ledger 
+    WHERE user_id = NEW.user_id AND source = 'video';
+    
+    IF v_video_count = 1 THEN
+      SELECT id INTO v_badge_id FROM public.badges WHERE code = 'first_video' LIMIT 1;
+      IF v_badge_id IS NOT NULL THEN
+        INSERT INTO public.user_badges (user_id, badge_id)
+        VALUES (NEW.user_id, v_badge_id)
+        ON CONFLICT (user_id, badge_id) DO NOTHING;
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+ $$;
+
+DROP TRIGGER IF EXISTS trg_award_badges ON public.coin_ledger;
+CREATE TRIGGER trg_award_badges
+  AFTER INSERT ON public.coin_ledger
+  FOR EACH ROW EXECUTE FUNCTION public.handle_badge_awards();
+
 -- =====================================================================
 -- DONE — promote your first admin manually:
---   INSERT INTO public.user_roles (user_id, role) VALUES ('<uuid>', 'admin');
+-- =====================================================================
+INSERT INTO user_roles (user_id, role)
+SELECT id, 'admin' FROM auth.users WHERE email = 'tiwana5879@badgerhole.com' LIMIT 1;
 -- =====================================================================

@@ -1,6 +1,3 @@
-// ═══════════════════════════════════════════════════
-// VideoPlayer.tsx
-// ═══════════════════════════════════════════════════
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Play, Loader2, AlertCircle } from "lucide-react";
 // @ts-ignore - Plyr's official types are incomplete
@@ -8,6 +5,7 @@ import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import Hls from "hls.js";
 import { detectVideo, DetectedVideo } from "@/lib/videoSource";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface PlayerVideo {
   id: string;
@@ -43,7 +41,6 @@ const VideoPlayer = ({
   const playerElRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
-  // Tracking
   const completedRef = useRef(false);
   const lastProgressEmitRef = useRef(0);
   const watchedSecondsRef = useRef(0);
@@ -66,7 +63,6 @@ const VideoPlayer = ({
     }
   }, []);
 
-  // Reset on video change
   useEffect(() => {
     destroyPlayer();
     setState("thumbnail");
@@ -81,7 +77,6 @@ const VideoPlayer = ({
 
   useEffect(() => () => destroyPlayer(), [destroyPlayer]);
 
-  // Plyr event tracking
   const attachPlyrTracking = useCallback((player: Plyr) => {
     const onReady = () => {
       setState("playing");
@@ -158,20 +153,17 @@ const VideoPlayer = ({
     };
   }, [onPlayed, onProgress, onComplete, onMinuteWatched]);
 
-  // Initialize player
-  const initPlayer = useCallback(() => {
+  const initPlayer = useCallback(async () => {
     if (!playerElRef.current) return;
     playerElRef.current.innerHTML = "";
     setErrorMsg("");
 
-    // Unknown
     if (detected.provider === "unknown") {
       setErrorMsg("Unsupported video format");
       setState("error");
       return;
     }
 
-    // External iframe
     if (detected.provider === "external" && detected.embedUrl) {
       try {
         const iframe = document.createElement("iframe");
@@ -190,10 +182,10 @@ const VideoPlayer = ({
       } catch {
         setErrorMsg("Failed to load video");
         setState("error");
+        return;
       }
     }
 
-    // YouTube via Plyr
     if (detected.provider === "youtube" && detected.id) {
       try {
         const wrapper = document.createElement("div");
@@ -216,17 +208,34 @@ const VideoPlayer = ({
       } catch {
         setErrorMsg("Failed to load YouTube video");
         setState("error");
+        return;
       }
     }
 
-    // Bunny.net via HLS.js + Plyr
-    if (detected.provider === "bunny" && detected.embedUrl) {
+    if (detected.provider === "bunny") {
       try {
+        let src = detected.embedUrl;
+
+        if (!src) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.access_token) {
+            throw new Error("Please sign in to watch this video");
+          }
+
+          const { data, error } = await supabase.functions.invoke('generate-video-url', {
+            body: { videoPath: `/${detected.id}/playlist.m3u8` },
+          });
+
+          if (error || !data?.secureUrl) {
+            throw new Error(error?.message || "Failed to authenticate video");
+          }
+          src = data.secureUrl;
+        }
+
         const videoEl = document.createElement("video");
         videoEl.setAttribute("playsinline", "");
         videoEl.setAttribute("webkit-playsinline", "");
         videoEl.setAttribute("x5-playsinline", "");
-        videoEl.crossOrigin = "anonymous";
         videoEl.preload = "metadata";
         videoEl.style.cssText = "position:absolute;inset:0;width:100%;height:100%;";
         playerElRef.current.appendChild(videoEl);
@@ -250,7 +259,6 @@ const VideoPlayer = ({
           }
         };
 
-        const src = detected.embedUrl;
         if (Hls.isSupported()) {
           const hls = new Hls({
             enableWorker: true, lowLatencyMode: true, backBufferLength: 30,
@@ -276,9 +284,10 @@ const VideoPlayer = ({
           setState("error");
         }
         return;
-      } catch {
-        setErrorMsg("Failed to load Bunny video");
+      } catch (err: any) {
+        setErrorMsg(err?.message || "Video authentication failed");
         setState("error");
+        return;
       }
     }
 
@@ -289,7 +298,7 @@ const VideoPlayer = ({
   const handlePlay = useCallback(() => {
     if (state !== "thumbnail") return;
     setState("loading");
-    setTimeout(() => initPlayer(), 150);
+    initPlayer();
   }, [state, initPlayer]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -310,12 +319,16 @@ const VideoPlayer = ({
       role="region"
       aria-label={`Video player: ${video.title}`}
     >
-      {/* Thumbnail */}
-      {state === "thumbnail" && thumbnail && (
+      {/* GHOST THUMBNAIL: Stays visible during loading to prevent black flash */}
+      {(state === "thumbnail" || state === "loading") && thumbnail && (
+        <div className="absolute inset-0 z-10" style={thumbnailStyle} />
+      )}
+
+      {/* PLAY BUTTON: Only renders on initial thumbnail, vanishes instantly on click */}
+      {state === "thumbnail" && (
         <button
           type="button"
           className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60"
-          style={thumbnailStyle}
           onClick={handlePlay}
           onKeyDown={handleKeyDown}
           aria-label={`Play video: ${video.title}`}
@@ -332,18 +345,20 @@ const VideoPlayer = ({
         </button>
       )}
 
-      {/* Loading */}
+      {/* LOADING SPINNER: Shows after play is pressed while player initializes */}
       {state === "loading" && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center" style={thumbnail ? thumbnailStyle : {}}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/30" />
           <div className="relative z-10 flex flex-col items-center gap-3">
-            <Loader2 className="w-10 h-10 sm:w-12 sm:h-12 text-white animate-spin" />
-            <span className="text-xs sm:text-sm font-medium text-white/90 tracking-wide">Loading...</span>
+            <div className="w-14 h-14 sm:w-[72px] sm:h-[72px] rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+              <Loader2 className="w-7 h-7 sm:w-8 sm:h-8 text-white animate-spin" />
+            </div>
+            <span className="text-xs font-medium text-white/80 tracking-wide">Loading video…</span>
           </div>
         </div>
       )}
 
-      {/* Error */}
+      {/* ERROR OVERLAY */}
       {state === "error" && (
         <div className="absolute inset-0 z-20 flex items-center justify-center p-6" style={thumbnail ? thumbnailStyle : {}}>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
@@ -360,7 +375,7 @@ const VideoPlayer = ({
         </div>
       )}
 
-      {/* Buffering overlay */}
+      {/* BUFFERING OVERLAY: Shows if it stutters DURING playback */}
       {state === "playing" && isSeeking && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
           <div className="absolute inset-0 bg-black/20" />
@@ -370,10 +385,10 @@ const VideoPlayer = ({
         </div>
       )}
 
-      {/* Plyr mount point */}
+      {/* PLYR MOUNT POINT */}
       <div
         ref={playerElRef}
-        className={`plyr-container absolute inset-0 z-30 transition-opacity duration-200 ${
+        className={`plyr-container absolute inset-0 z-30 ${
           state === "playing" ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       />

@@ -7,16 +7,18 @@ export interface DetectedVideo {
   provider: VideoProvider;
   /** Normalised id (YouTube id, Bunny uuid, or original string for external). */
   id: string;
-  /** Embed URL (for bunny/external iframes or HLS playlist). */
-  embedUrl?: string;
+  /** Embed URL. Returns NULL for Bunny because it requires a secure backend token. */
+  embedUrl: string | null;
   /** Default thumbnail URL. */
   thumbnail: string;
 }
 
-// ✅ Bunny config — ONLY VITE_BUNNY_CDN_HOSTNAME required
-// Example: "vz-3cf84610-3c6" → builds: https://vz-3cf84610-3c6.b-cdn.net/{uuid}/playlist.m3u8
-export const BUNNY_CDN_HOSTNAME =
-  (import.meta as any).env?.VITE_BUNNY_CDN_HOSTNAME || "vz-3cf84610-3c6";
+// ✅ ONLY this goes in your .env file
+export const BUNNY_CDN_HOSTNAME = import.meta.env.VITE_BUNNY_CDN_HOSTNAME || "vz-3cf84610-3c6";
+
+// ❌ DO NOT ADD THE TOKEN KEY HERE. 
+// It must be added in Supabase Dashboard -> Settings -> Edge Functions -> Secrets
+// Secret Name: BUNNY_TOKEN_AUTH_KEY
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -25,7 +27,7 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
   const id = (rawId || "").trim();
   
   if (!id) {
-    return { provider: "unknown", id: "", thumbnail: "/placeholder.svg" };
+    return { provider: "unknown", id: "", embedUrl: null, thumbnail: "/placeholder.svg" };
   }
 
   // ── External URL (zoom, meet, teams, http/https link) ──
@@ -43,7 +45,7 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     return {
       provider: "bunny",
       id,
-      embedUrl: `https://${BUNNY_CDN_HOSTNAME}.b-cdn.net/${id}/playlist.m3u8`,
+      embedUrl: null, 
       thumbnail: `https://${BUNNY_CDN_HOSTNAME}.b-cdn.net/${id}/thumbnail.jpg`,
     };
   }
@@ -53,6 +55,7 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     return {
       provider: "youtube",
       id,
+      embedUrl: `https://www.youtube.com/embed/${id}`,
       thumbnail: `https://img.youtube.com/vi/${id}/maxresdefault.jpg`,
     };
   }
@@ -64,10 +67,11 @@ export function detectVideo(rawId: string | null | undefined): DetectedVideo {
     return {
       provider: "youtube",
       id: yid,
+      embedUrl: `https://www.youtube.com/embed/${yid}`,
       thumbnail: `https://img.youtube.com/vi/${yid}/maxresdefault.jpg`,
     };
   }
 
   // ── Fallback ──
-  return { provider: "unknown", id, thumbnail: "/placeholder.svg" };
+  return { provider: "unknown", id, embedUrl: null, thumbnail: "/placeholder.svg" };
 }
