@@ -207,6 +207,19 @@ export type Database = {
     }
     Views: { [_ in never]: never }
     Functions: {
+      get_leaderboard: {
+        Args: { _course_id: string | null }
+        Returns: {
+          user_id: string
+          display_name: string | null
+          avatar_url: string | null
+          level: number
+          xp: number
+          coins: number
+          videos: number
+          tests: number
+        }[]
+      }
       has_role: { Args: { _role: Database["public"]["Enums"]["app_role"]; _user_id: string }; Returns: boolean }
       is_enrolled: { Args: { _course_id: string; _user_id: string }; Returns: boolean }
     }

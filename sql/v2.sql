@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS public.referrals (
 -- 3.20 coin_ledger ---------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.coin_ledger (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    uuid NOT NULL,
+  user_id    uuid NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE,
   source     text NOT NULL,
   ref_id     text,
   course_id  uuid REFERENCES public.courses(id) ON DELETE SET NULL,
@@ -404,6 +404,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$   WITH user_
     CASE WHEN _course_id IS NULL THEN p.coins ELSE COALESCE(s.sum_coins, 0) END DESC
   LIMIT 100;
  $$;
+
+-- FIX: Grant execute permission so frontend (anon/auth) can call this RPC
+GRANT EXECUTE ON FUNCTION public.get_leaderboard TO anon, authenticated;
 
 -- =====================================================================
 -- 7. NEW-USER TRIGGER (creates profile + role + referral on signup)
