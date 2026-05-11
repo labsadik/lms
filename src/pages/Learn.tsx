@@ -20,11 +20,18 @@ import { cn } from "@/lib/utils";
    Types
    ════════════════════════════════════════════════════════ */
 interface Course { id: string; title: string; [k: string]: unknown }
+
 interface Part {
-  id: string; name: string; video_id: string; live_url: string | null;
-  kind: "recorded" | "live"; notes_url: string | null;
-  duration: string | null; position: number; is_preview: boolean;
+  id: string; 
+  name: string; 
+  video_id: string; 
+  kind: "recorded" | "live"; 
+  notes_url: string | null;
+  duration: string | null; 
+  position: number; 
+  is_preview: boolean;
 }
+
 interface Chapter { id: string; name: string; position: number; parts: Part[] }
 interface Subject { id: string; name: string; position: number; chapters: Chapter[] }
 interface TestItem {
@@ -470,7 +477,7 @@ export default function Learn() {
 
   useSEO({ title: course ? `Learn: ${course.title}` : "Learning", description: "Continue your learning" });
 
-  /* ── Phase 1 ── */
+  /* ── Phase 1: Load course ── */
   useEffect(() => {
     let alive = true;
     if (!slug) { setCourseErr(true); return; }
@@ -484,7 +491,7 @@ export default function Learn() {
     return () => { alive = false; };
   }, [slug]);
 
-  /* ── Phase 2 ── */
+  /* ── Phase 2: Load content tree ── */
   useEffect(() => {
     if (!course) return;
     let alive = true;
@@ -492,18 +499,43 @@ export default function Learn() {
       try {
         const [er, tr, tsr] = await Promise.all([
           user ? supabase.from("enrollments").select("id").eq("user_id", user.id).eq("course_id", course.id).maybeSingle() : null,
-          supabase.from("subjects").select("id,name,position,chapters(id,name,position,parts(id,name,kind,live_url,video_id,notes_url,duration,position,is_preview)))").eq("course_id", course.id).order("position"),
+          
+          supabase.from("subjects").select(`
+            id,
+            name,
+            position,
+            chapters (
+              id,
+              name,
+              position,
+              parts (
+                id,
+                name,
+                kind,
+                video_id,
+                notes_url,
+                duration,
+                position,
+                is_preview
+              )
+            )
+          `).eq("course_id", course.id).order("position"),
+          
           supabase.from("tests").select("id,title,scope,subject_id,chapter_id,duration_minutes").eq("course_id", course.id).eq("is_published", true),
         ]);
+        
         if (!alive) return;
         if (er?.data) setEnrolled(true);
+        
         setTree((tr.data || []).map((s: any) => ({
           ...s,
           chapters: (s.chapters || []).sort((a: any, b: any) => a.position - b.position).map((c: any) => ({
             ...c, parts: (c.parts || []).sort((a: any, b: any) => a.position - b.position),
           })),
         })));
+        
         setTests(tsr.data || []);
+        
         if (user) {
           const [pr, ar] = await Promise.all([
             supabase.from("progress").select("part_id").eq("user_id", user.id).eq("completed", true),
@@ -515,7 +547,10 @@ export default function Learn() {
           ar.data?.forEach((a: any) => { if (a.finished_at) tc.add(a.test_id); });
           setTestCompletions(tc);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.error("Failed to load course:", e); 
+        toast.error("Failed to load course content");
+      }
       finally { if (alive) setReady(true); }
     })();
     return () => { alive = false; };
@@ -545,7 +580,6 @@ export default function Learn() {
       setView(s.view);
       setTimeout(() => { isRestoringRef.current = false; }, 50);
     } catch { isRestoringRef.current = false; }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, tree]);
 
   /* ── Save view ── */
@@ -575,7 +609,6 @@ export default function Learn() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   /* ── Derived ── */
@@ -668,7 +701,7 @@ export default function Learn() {
 
   /* ══════════════════════════════════════════════════════
      Error / Loading
-     ════════════════════════════════════════════════════════ */
+     ══════════════════════════════════════════════════════ */
   if (courseErr) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] gap-3 bg-background px-6 text-center">
@@ -681,9 +714,9 @@ export default function Learn() {
   }
   if (!course || !ready) return <ViewSkeleton view={skeletonView} />;
 
-  /* ════════════════════════════════════════════════════════
+  /* ══════════════════════════════════════════════════════
      RENDER
-     ════════════════════════════════════════════════════════ */
+     ══════════════════════════════════════════════════════ */
   return (
     <div className="flex flex-col h-[100dvh] bg-background">
 
@@ -865,17 +898,18 @@ export default function Learn() {
             <div className="flex flex-col min-h-0 w-full lg:flex-1">
               <div className="shrink-0 relative w-full bg-black aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0">
                 <div className="absolute inset-0">
-                  {activePart.kind === "recorded" ? (
-                    <VideoPlayer
-                      key={activePart.id}
-                      video={{ id: activePart.video_id, title: activePart.name, duration: activePart.duration ?? undefined }}
-                      onProgress={setWatchPct} onComplete={handleComplete} onMinuteWatched={handleMinute}
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500 text-sm">
-                      Video not available
-                    </div>
-                  )}
+                  <VideoPlayer
+                    key={activePart.id}
+                    video={{ 
+                      id: activePart.video_id,
+                      kind: activePart.kind,  
+                      title: activePart.name, 
+                      duration: activePart.duration ?? undefined 
+                    }}
+                    onProgress={setWatchPct} 
+                    onComplete={activePart.kind === "recorded" ? handleComplete : undefined}
+                    onMinuteWatched={activePart.kind === "recorded" ? handleMinute : undefined}
+                  />
                 </div>
                 {activePart.kind === "recorded" && watchPct > 0 && (
                   <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/10 z-50">

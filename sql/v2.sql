@@ -97,7 +97,6 @@ CREATE TABLE IF NOT EXISTS public.parts (
   name       text NOT NULL,
   kind       public.part_kind NOT NULL DEFAULT 'recorded',
   video_id   text NOT NULL,
-  live_url   text,
   notes_url  text,
   duration   text,
   position   integer NOT NULL DEFAULT 0,
