@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader2, Play, BookOpen, FileText, Tag, CheckCircle2 } from 'lucide-react';
+import { Loader2, Play, BookOpen, Tag, CheckCircle2 } from 'lucide-react';
 import {
   Accordion,
   AccordionContent,
@@ -43,8 +43,6 @@ const CourseDetail = () => {
   const [promo, setPromo] = useState('');
   const [discount, setDiscount] = useState<{ amount: number; code: string; promocode_id: string } | null>(null);
   const [enrolling, setEnrolling] = useState(false);
-  
-  // State for "Read more" toggle
   const [isDescExpanded, setIsDescExpanded] = useState(false);
 
   useSEO({
@@ -65,16 +63,19 @@ const CourseDetail = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('paid') === '1') toast.success('Payment received! Enrolling…');
     if (params.get('canceled') === '1') toast.info('Payment canceled.');
+    
     const load = async () => {
       setLoading(true);
       const { data: c } = await supabase.from('courses').select('*').eq('slug', slug).eq('is_published', true).maybeSingle();
       if (!c) { setLoading(false); return; }
       setCourse(c);
+      
       const { data: subjects } = await supabase
         .from('subjects')
         .select('id, name, position, chapters(id, name, position, parts(id, name, video_id, notes_url, duration, position, is_preview))')
         .eq('course_id', c.id)
         .order('position');
+        
       const sorted = (subjects || []).map((s: any) => ({
         ...s,
         chapters: (s.chapters || []).sort((a: any, b: any) => a.position - b.position).map((ch: any) => ({
@@ -82,6 +83,7 @@ const CourseDetail = () => {
           parts: (ch.parts || []).sort((a: any, b: any) => a.position - b.position),
         })),
       }));
+      
       setTree(sorted);
 
       if (user) {
@@ -143,6 +145,20 @@ const CourseDetail = () => {
 
   const finalPrice = Math.max(0, course.price_inr - (discount?.amount || 0));
 
+  // Click handler for locked lectures
+  const handleLockedClick = () => {
+    if (!user) {
+      nav('/auth');
+      toast.info('Please login to access lectures');
+      return;
+    }
+    if (enrolled) {
+      nav(`/learn/${course.slug}`);
+      return;
+    }
+    toast.info('Please enroll to access this lecture');
+  };
+
   return (
     <div className="flex-1 px-4 py-6 sm:py-10 max-w-7xl w-full mx-auto">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -151,7 +167,6 @@ const CourseDetail = () => {
             <h1 className="text-3xl sm:text-4xl font-bold mb-2">{course.title}</h1>
             {course.instructor && <p className="text-muted-foreground">by {course.instructor}</p>}
             
-            {/* Swift Description: Clamped by default, "Read more" to expand */}
             {course.description && (
               <div className="mt-4">
                 <div className={`${!isDescExpanded ? 'line-clamp-3' : ''} text-foreground/90 leading-relaxed`}>
@@ -178,7 +193,9 @@ const CourseDetail = () => {
                 {tree.map((subject: any) => (
                   <AccordionItem key={subject.id} value={subject.id} className="border border-border rounded-lg bg-card px-4">
                     <AccordionTrigger className="hover:no-underline">
-                      <span className="flex items-center gap-2 text-left"><BookOpen className="w-4 h-4 text-primary" />{subject.name}</span>
+                      <span className="flex items-center gap-2 text-left">
+                        <BookOpen className="w-4 h-4 text-primary" />{subject.name}
+                      </span>
                     </AccordionTrigger>
                     <AccordionContent>
                       <Accordion type="multiple" className="space-y-1 ml-2">
@@ -186,16 +203,55 @@ const CourseDetail = () => {
                           <AccordionItem key={ch.id} value={ch.id} className="border-0">
                             <AccordionTrigger className="text-sm hover:no-underline py-2">{ch.name}</AccordionTrigger>
                             <AccordionContent>
-                              <ul className="space-y-1 ml-4">
-                                {ch.parts.map((p: any) => (
-                                  <li key={p.id} className="flex items-center justify-between gap-2 text-sm py-1.5 border-b border-border/50">
-                                    <span className="flex items-center gap-2 min-w-0 flex-1">
-                                      <Play className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                                      <span className="truncate">{p.name}</span>
-                                    </span>
-                                    {p.duration && <span className="text-xs text-muted-foreground flex-shrink-0">{p.duration}</span>}
-                                  </li>
-                                ))}
+                              <ul className="space-y-1.5 ml-4">
+                                {ch.parts.map((p: any) => {
+                                  const isFree = p.is_preview;
+                                  
+                                  const lectureElement = (
+                                    <div className={`flex items-center justify-between gap-2 text-sm py-2 px-2 rounded-lg border transition-colors ${
+                                      isFree 
+                                        ? 'border-primary/20 hover:bg-primary/5 cursor-pointer' 
+                                        : 'border-border bg-muted/30 cursor-pointer hover:bg-muted/50'
+                                    }`}>
+                                      <span className="flex items-center gap-2 min-w-0 flex-1">
+                                        {isFree ? (
+                                          <Play className="w-4 h-4 text-primary flex-shrink-0" />
+                                        ) : (
+                                          <svg className="w-4 h-4 text-muted-foreground flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                          </svg>
+                                        )}
+                                        <span className={`truncate ${!isFree ? 'text-muted-foreground' : ''}`}>{p.name}</span>
+                                      </span>
+                                      {p.duration && <span className="text-xs text-muted-foreground flex-shrink-0">{p.duration}</span>}
+                                      {isFree ? (
+                                        <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded flex-shrink-0">FREE</span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded text-muted-foreground flex-shrink-0">LOCKED</span>
+                                      )}
+                                    </div>
+                                  );
+
+                                  // FREE lectures link to the learn page so the user can watch them
+                                  if (isFree) {
+                                    return (
+                                      <Link to={`/learn/${course.slug}`} key={p.id} className="block no-underline">
+                                        {lectureElement}
+                                      </Link>
+                                    );
+                                  }
+
+                                  // LOCKED lectures trigger enrollment flow
+                                  return (
+                                    <div 
+                                      key={p.id} 
+                                      onClick={handleLockedClick}
+                                    >
+                                      {lectureElement}
+                                    </div>
+                                  );
+                                })}
                               </ul>
                             </AccordionContent>
                           </AccordionItem>
@@ -216,8 +272,12 @@ const CourseDetail = () => {
             <div className="p-4 space-y-3">
               {enrolled ? (
                 <>
-                  <div className="flex items-center gap-2 text-green-500 font-semibold"><CheckCircle2 className="w-5 h-5" /> Enrolled</div>
-                  <Button asChild className="w-full" size="lg"><Link to={`/learn/${course.slug}`}>Continue Learning</Link></Button>
+                  <div className="flex items-center gap-2 text-green-500 font-semibold">
+                    <CheckCircle2 className="w-5 h-5" /> Enrolled
+                  </div>
+                  <Button asChild className="w-full" size="lg">
+                    <Link to={`/learn/${course.slug}`}>Continue Learning</Link>
+                  </Button>
                 </>
               ) : (
                 <>
@@ -230,10 +290,18 @@ const CourseDetail = () => {
                   {course.price_inr > 0 && (
                     <div className="flex gap-2">
                       <Input value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} placeholder="Promo code" className="text-sm" />
-                      <Button variant="outline" size="sm" onClick={applyPromo}><Tag className="w-4 h-4" /></Button>
+                      <Button variant="outline" size="sm" onClick={applyPromo}>
+                        <Tag className="w-4 h-4" />
+                      </Button>
                     </div>
                   )}
-                  <Button className="w-full" size="lg" onClick={handleEnroll} disabled={enrolling}>
+                  <Button 
+                    id="enroll-btn"
+                    className="w-full" 
+                    size="lg" 
+                    onClick={handleEnroll} 
+                    disabled={enrolling}
+                  >
                     {enrolling ? <Loader2 className="w-4 h-4 animate-spin" /> : !user ? 'Sign in to Enroll' : (finalPrice === 0 ? 'Enroll Free' : 'Buy Course')}
                   </Button>
                   {!user && <p className="text-[11px] text-muted-foreground text-center">You can browse all courses, but must sign in to enroll.</p>}
