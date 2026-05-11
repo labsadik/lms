@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface Comment {
   id: string;
@@ -29,6 +30,7 @@ export function useComments(partId: string | null): UseCommentsReturn {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const sentIds = useRef<Set<string>>(new Set());
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   // Thread raw flat list into nested structure
   const comments = useMemo(() => {
@@ -87,8 +89,18 @@ export function useComments(partId: string | null): UseCommentsReturn {
   useEffect(() => {
     if (!partId) return;
 
+    // Clean up any existing channel from a previous render/race
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    // Unique channel name prevents collision on StrictMode double-mount
+    // or rapid partId changes before cleanup finishes
+    const channelName = `comments:${partId}:${Date.now()}`;
+
     const channel = supabase
-      .channel(`comments:${partId}`)
+      .channel(channelName, { config: { broadcast: { self: false } } })
       .on(
         "postgres_changes",
         {
@@ -108,8 +120,13 @@ export function useComments(partId: string | null): UseCommentsReturn {
       )
       .subscribe();
 
+    channelRef.current = channel;
+
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [partId]);
 

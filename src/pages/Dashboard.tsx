@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
-import { Loader2, Trophy, Flame, Coins, Star, BookOpen, Award, Wallet, Tag, ChevronRight } from 'lucide-react';
+import { Loader2, Trophy, Flame, Coins, Star, BookOpen, Award, Wallet, Tag, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import GlobalLeaderboardDialog from '@/components/GlobalLeaderboardDialog';
 import { levelFromXP, formatPriceINR } from '@/lib/format';
 import { useSEO } from '@/lib/seo';
+import { cn } from '@/lib/utils';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -15,6 +16,7 @@ const Dashboard = () => {
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [badges, setBadges] = useState<any[]>([]);
   const [redemptions, setRedemptions] = useState<any[]>([]);
+  const [courseProgress, setCourseProgress] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [lbOpen, setLbOpen] = useState(false);
 
@@ -22,18 +24,55 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([
-      supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle(),
-      supabase.from('enrollments').select('id, course_id, amount_paid_inr, promocode, courses(id, slug, title, thumbnail_url)').eq('user_id', user.id),
-      supabase.from('user_badges').select('id, earned_at, badges(*)').eq('user_id', user.id).order('earned_at', { ascending: false }),
-      supabase.from('promocode_redemptions').select('id, redeemed_at, promocodes(code, discount_type, discount_value), courses(title)').eq('user_id', user.id).order('redeemed_at', { ascending: false }),
-    ]).then(([p, e, b, r]) => {
+
+    (async () => {
+      const [p, e, b, r] = await Promise.all([
+        supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle(),
+        supabase.from('enrollments').select('id, course_id, amount_paid_inr, promocode, courses(id, slug, title, thumbnail_url)').eq('user_id', user.id),
+        supabase.from('user_badges').select('id, earned_at, badges(*)').eq('user_id', user.id).order('earned_at', { ascending: false }),
+        supabase.from('promocode_redemptions').select('id, redeemed_at, promocodes(code, discount_type, discount_value), courses(title)').eq('user_id', user.id).order('redeemed_at', { ascending: false }),
+      ]);
+
       setProfile(p.data);
-      setEnrollments(e.data || []);
+      const enrollData = e.data || [];
+      setEnrollments(enrollData);
       setBadges(b.data || []);
       setRedemptions(r.data || []);
+
+      // ── Fetch course progress ──
+      if (enrollData.length > 0) {
+        const courseIds = enrollData.map((en: any) => en.course_id);
+
+        const [progressRes, subjectsRes] = await Promise.all([
+          supabase.from('progress').select('part_id').eq('user_id', user.id).eq('completed', true),
+          supabase.from('subjects').select('id, course_id, chapters(id, parts(id))').in('course_id', courseIds),
+        ]);
+
+        const completedIds = new Set((progressRes.data || []).map((x: any) => x.part_id));
+
+        // Build map: course_id → all part ids
+        const partsByCourse: Record<string, string[]> = {};
+        (subjectsRes.data || []).forEach((s: any) => {
+          if (!partsByCourse[s.course_id]) partsByCourse[s.course_id] = [];
+          (s.chapters || []).forEach((ch: any) => {
+            (ch.parts || []).forEach((pt: any) => {
+              partsByCourse[s.course_id].push(pt.id);
+            });
+          });
+        });
+
+        const pctMap: Record<string, number> = {};
+        for (const cid of courseIds) {
+          const all = partsByCourse[cid] || [];
+          if (all.length === 0) { pctMap[cid] = 0; continue; }
+          const done = all.filter((pid: string) => completedIds.has(pid)).length;
+          pctMap[cid] = Math.round((done / all.length) * 100);
+        }
+        setCourseProgress(pctMap);
+      }
+
       setLoading(false);
-    });
+    })();
   }, [user]);
 
   if (loading) return <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
@@ -43,18 +82,17 @@ const Dashboard = () => {
   const progressPct = Math.round((lvl.xpIntoLevel / lvl.xpToNext) * 100);
   const totalSpent = enrollments.reduce((s, e: any) => s + (e.amount_paid_inr || 0), 0);
 
-  // Dynamic XP Bar Color Logic
   const getBarColor = (p: number) => {
-    if (p < 40) return '#FACC15'; // Yellow for low
-    if (p < 80) return '#F97316'; // Orange for mid
-    return '#22C55E';             // Green for almost/max complete
+    if (p < 40) return '#FACC15';
+    if (p < 80) return '#F97316';
+    return '#22C55E';
   };
   const barColor = getBarColor(progressPct);
 
   return (
     <div className="flex-1 px-4 py-6 sm:py-10 max-w-6xl w-full mx-auto space-y-6">
-      
-      {/* Header Section */}
+
+      {/* Header */}
       <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back, {profile.display_name || 'learner'} 👋</h1>
@@ -65,7 +103,7 @@ const Dashboard = () => {
         </Button>
       </header>
 
-      {/* Top Stats Grid */}
+      {/* Top Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard icon={Star} label="Level" value={lvl.level} color="text-[hsl(var(--xp))]" />
         <StatCard icon={Trophy} label="Total XP" value={profile.xp} color="text-[hsl(var(--xp))]" />
@@ -73,9 +111,8 @@ const Dashboard = () => {
         <StatCard icon={Coins} label="Coins" value={profile.coins} color="text-[hsl(var(--coin))]" />
       </div>
 
-      {/* XP Progress & Secondary Stats Grid */}
+      {/* XP Progress + Financial */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {/* XP Progress Card - Spans 2 columns */}
         <Card className="p-4 sm:p-5 bg-card border-border sm:col-span-2 flex flex-col justify-center">
           <div className="flex justify-between mb-2 text-sm">
             <span className="font-semibold">Level {lvl.level}</span>
@@ -83,26 +120,21 @@ const Dashboard = () => {
               {lvl.xpIntoLevel.toLocaleString()} / {lvl.xpToNext.toLocaleString()} XP
             </span>
           </div>
-          
-          {/* Custom Dynamic Progress Bar */}
           <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-secondary">
-            <div 
+            <div
               className="h-full rounded-full transition-all duration-500 ease-out"
-              style={{ 
-                width: `${progressPct}%`, 
-                background: barColor, // Strict 'background' prevents white bar glitch
-                boxShadow: `0 0 12px ${barColor}50` 
+              style={{
+                width: `${progressPct}%`,
+                background: barColor,
+                boxShadow: `0 0 12px ${barColor}50`,
               }}
             />
           </div>
           <div className="flex justify-end mt-1.5">
-            <span className="text-[11px] font-bold tabular-nums" style={{ color: barColor }}>
-              {progressPct}%
-            </span>
+            <span className="text-[11px] font-bold tabular-nums" style={{ color: barColor }}>{progressPct}%</span>
           </div>
         </Card>
 
-        {/* Financial Stats Column */}
         <div className="flex flex-col gap-3">
           <Card className="p-4 bg-card border-border flex-1 flex flex-col justify-center">
             <Wallet className="w-4 h-4 mb-1.5 text-primary" />
@@ -117,7 +149,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* My Courses Section */}
+      {/* My Courses */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold flex items-center gap-2"><BookOpen className="w-5 h-5 text-primary" /> My Courses</h2>
@@ -127,7 +159,7 @@ const Dashboard = () => {
             </Link>
           )}
         </div>
-        
+
         {enrollments.length === 0 ? (
           <Card className="p-8 text-center bg-card border-border">
             <BookOpen className="w-10 h-10 mx-auto text-muted-foreground/40 mb-3" />
@@ -136,29 +168,78 @@ const Dashboard = () => {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {enrollments.map((en: any) => (
-              <Link key={en.id} to={`/learn/${en.courses.slug}`}>
-                <Card className="overflow-hidden bg-card border-border hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 h-full group">
-                  <div className="overflow-hidden">
-                    {en.courses.thumbnail_url && (
-                      <img src={en.courses.thumbnail_url} alt={en.courses.title} className="w-full aspect-video object-cover group-hover:scale-105 transition-transform duration-300" />
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <h3 className="font-semibold text-sm line-clamp-2 group-hover:text-primary transition-colors">{en.courses.title}</h3>
-                    <div className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1.5 flex-wrap">
-                      <span>Paid {formatPriceINR(en.amount_paid_inr)}</span>
-                      {en.promocode && en.promocode !== 'ADMIN_GRANT' && (
-                        <>
-                          <span className="text-border">·</span>
-                          <span className="font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded">{en.promocode}</span>
-                        </>
+            {enrollments.map((en: any) => {
+              const pct = courseProgress[en.course_id] ?? 0;
+              const isComplete = pct === 100;
+
+              return (
+                <Link key={en.id} to={`/learn/${en.courses.slug}`}>
+                  <Card className="overflow-hidden bg-card border-border hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 h-full group">
+                    {/* Thumbnail */}
+                    <div className="overflow-hidden relative">
+                      {en.courses.thumbnail_url && (
+                        <img
+                          src={en.courses.thumbnail_url}
+                          alt={en.courses.title}
+                          className="w-full aspect-video object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      )}
+                      {/* Completion badge */}
+                      {isComplete && (
+                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
+                          <CheckCircle2 className="w-3 h-3" /> Done
+                        </div>
+                      )}
+                      {/* Percentage badge */}
+                      {!isComplete && pct > 0 && (
+                        <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-[11px] font-bold tabular-nums px-2 py-0.5 rounded-full">
+                          {pct}%
+                        </div>
                       )}
                     </div>
-                  </div>
-                </Card>
-              </Link>
-            ))}
+
+                    {/* Info */}
+                    <div className="p-3">
+                      <h3 className="font-semibold text-sm line-clamp-2 group-hover:text-primary transition-colors">{en.courses.title}</h3>
+                      <div className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1.5 flex-wrap">
+                        <span>Paid {formatPriceINR(en.amount_paid_inr)}</span>
+                        {en.promocode && en.promocode !== 'ADMIN_GRANT' && (
+                          <>
+                            <span className="text-border">·</span>
+                            <span className="font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded">{en.promocode}</span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="mt-2.5">
+                        <div className="h-[5px] w-full overflow-hidden rounded-full bg-secondary">
+                          <div
+                            className="h-full rounded-full transition-all duration-500 ease-out"
+                            style={{
+                              width: `${pct}%`,
+                              background: isComplete ? '#22C55E' : pct > 0 ? '#3B82F6' : '#E5E7EB',
+                              boxShadow: pct > 0 ? `0 0 8px ${isComplete ? '#22C55E' : '#3B82F6'}40` : 'none',
+                            }}
+                          />
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          <span className="text-[10px] text-muted-foreground">
+                            {isComplete ? 'Course completed!' : pct > 0 ? 'In progress' : 'Not started'}
+                          </span>
+                          <span className={cn(
+                            "text-[10px] font-bold tabular-nums",
+                            isComplete ? "text-green-500" : pct > 0 ? "text-primary" : "text-muted-foreground/50",
+                          )}>
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>
@@ -183,7 +264,7 @@ const Dashboard = () => {
         </section>
       )}
 
-      {/* Badges Section */}
+      {/* Badges */}
       <section>
         <h2 className="text-xl font-bold mb-3 flex items-center gap-2"><Award className="w-5 h-5 text-primary" /> Badges Earned ({badges.length})</h2>
         {badges.length === 0 ? (
@@ -205,7 +286,7 @@ const Dashboard = () => {
           </div>
         )}
       </section>
-      
+
       <GlobalLeaderboardDialog open={lbOpen} onOpenChange={setLbOpen} />
     </div>
   );

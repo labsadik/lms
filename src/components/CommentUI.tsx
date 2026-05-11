@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useComments, type Comment } from "@/hooks/useComments";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Loader2, User, Reply, AtSign, X, MessageSquare } from "lucide-react";
+import { Send, Loader2, Reply, AtSign, X, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CommentUIProps {
@@ -28,43 +28,66 @@ const CommentRow = memo(function CommentRow({
   onReply: (id: string, name: string) => void;
   parentDisplayName?: string;
 }) {
-  const [showReplies, setShowReplies] = useState(true);
+  // Hidden by default
+  const [showReplies, setShowReplies] = useState(false);
   const hasReplies = comment.replies && comment.replies.length > 0;
   const isReply = !!parentDisplayName;
 
   const content = (
-    <div className="flex gap-2 sm:gap-2.5 py-2 sm:py-2.5 px-3 sm:px-4">
-      <div className="shrink-0 w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+    <div className="flex gap-3 py-3 px-4 group hover:bg-muted/30 transition-colors duration-150">
+      {/* Avatar */}
+      <div className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-primary/20 to-muted border border-border/50 flex items-center justify-center overflow-hidden shadow-sm">
         {comment.avatar_url ? (
           <img src={comment.avatar_url} alt="" className="w-full h-full object-cover" loading="lazy" />
         ) : (
-          <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground/50" />
+          <span className="text-xs font-bold text-primary/70">
+            {(comment.display_name || "S").charAt(0).toUpperCase()}
+          </span>
         )}
       </div>
+
+      {/* Body */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1 sm:gap-1.5 mb-px flex-wrap">
-          <span className={cn("text-[11px] sm:text-sm font-semibold leading-none", own ? "text-primary" : "text-foreground")}>
+        {/* Meta */}
+        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+          <span className={cn(
+            "text-xs sm:text-sm font-semibold leading-none",
+            own ? "text-primary" : "text-foreground"
+          )}>
             {comment.display_name || "Student"}
-            {own && <span className="ml-1 text-[9px] sm:text-[10px] font-normal text-muted-foreground">(You)</span>}
+            {own && <span className="ml-1 text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">You</span>}
           </span>
           {isReply && parentDisplayName && (
-            <span className="inline-flex items-center gap-0.5 px-1 py-px rounded bg-primary/8 shrink-0">
-              <AtSign className="w-2 h-2 sm:w-2.5 sm:h-2.5 text-primary/40" />
-              <span className="text-[9px] sm:text-[10px] text-primary/50 font-medium">{parentDisplayName}</span>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/5 border border-primary/10 shrink-0">
+              <AtSign className="w-2.5 h-2.5 text-primary/40" />
+              <span className="text-[10px] text-primary/60 font-medium">{parentDisplayName}</span>
             </span>
           )}
-          <span className="text-[9px] sm:text-[11px] text-muted-foreground/50">{timeAgo(comment.created_at)}</span>
+          <span className="text-[10px] sm:text-[11px] text-muted-foreground/40 ml-auto">{timeAgo(comment.created_at)}</span>
         </div>
-        <p className="text-[12px] sm:text-sm text-foreground/90 leading-relaxed break-words whitespace-pre-wrap mt-0.5">{comment.message}</p>
-        <div className="flex items-center gap-3 mt-1">
-          <button onClick={() => onReply(comment.id, comment.display_name || "Student")}
-            className="flex items-center gap-1 text-[10px] sm:text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors py-0.5">
-            <Reply className="w-2.5 h-2.5 sm:w-3 sm:h-3" />Reply
+        
+        {/* Message */}
+        <p className="text-[13px] sm:text-sm text-foreground/90 leading-relaxed break-words whitespace-pre-wrap mt-1">
+          {comment.message}
+        </p>
+
+        {/* Actions - Both visible by default */}
+        <div className="flex items-center gap-1 mt-1.5">
+          {/* Reply button - Always visible now */}
+          <button 
+            onClick={() => onReply(comment.id, comment.display_name || "Student")}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-primary transition-colors font-medium py-1 px-2 rounded-md hover:bg-primary/5"
+          >
+            <Reply className="w-3 h-3" />Reply
           </button>
+          
+          {/* View Replies button - Always visible */}
           {hasReplies && (
-            <button onClick={() => setShowReplies((v) => !v)}
-              className="text-[10px] sm:text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors py-0.5">
-              {showReplies ? "Hide" : "View"} {comment.replies!.length}
+            <button 
+              onClick={() => setShowReplies((v) => !v)}
+              className="text-[11px] text-muted-foreground/60 hover:text-foreground transition-colors font-medium py-1 px-2 rounded-md hover:bg-muted/50"
+            >
+              {showReplies ? "Hide" : "View"} {comment.replies!.length} replies
             </button>
           )}
         </div>
@@ -74,19 +97,21 @@ const CommentRow = memo(function CommentRow({
 
   if (isReply) {
     return (
-      <div className="relative ml-1 sm:ml-2 animate-in fade-in slide-in-from-left-1 duration-300">
-        <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-primary/20 via-primary/10 to-transparent" />
-        <div className="absolute left-0 top-2 sm:top-2.5 w-2 sm:w-2.5 h-px bg-primary/20" />
-        <div className="pl-2.5 sm:pl-3.5">{content}</div>
+      <div className="relative ml-2 sm:ml-4 animate-in fade-in slide-in-from-left-1 duration-300">
+        {/* Thread Line */}
+        <div className="absolute left-0 top-0 bottom-0 w-px bg-border/40" />
+        <div className="absolute left-0 top-4 w-2.5 h-px bg-border/40" />
+        <div className="pl-4 sm:pl-5">{content}</div>
       </div>
     );
   }
 
   return (
-    <div className={cn(own && "bg-primary/[0.02]")}>
+    <div className={cn(own && "bg-primary/[0.02] border-l-2 border-primary/20")}>
       {content}
+      {/* Replies only show when "View X replies" is clicked */}
       {hasReplies && showReplies && (
-        <div>
+        <div className="bg-muted/10">
           {comment.replies!.map((r) => (
             <CommentRow
               key={r.id} comment={r} own={own} onReply={onReply}
@@ -112,7 +137,6 @@ export default function CommentUI({ partId }: CommentUIProps) {
     if (listRef.current) listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [comments.length]);
 
-  /* Scroll to input when reply target changes */
   useEffect(() => {
     if (replyTarget) inputRef.current?.focus();
   }, [replyTarget]);
@@ -128,14 +152,16 @@ export default function CommentUI({ partId }: CommentUIProps) {
   }, [handleSend]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 border-b border-border/40 flex items-center gap-1.5">
-        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground/50" />
-        <h3 className="text-xs sm:text-sm font-semibold text-foreground">
-          Comments
+      <div className="shrink-0 px-4 py-3 border-b border-border/40 flex items-center gap-2 bg-muted/20">
+        <MessageSquare className="w-4 h-4 text-primary/70" />
+        <h3 className="text-sm font-semibold text-foreground">
+          Discussion
           {comments.length > 0 && (
-            <span className="ml-1.5 text-[10px] sm:text-xs font-normal text-muted-foreground">{comments.length}</span>
+            <span className="ml-2 text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              {comments.length}
+            </span>
           )}
         </h3>
       </div>
@@ -144,18 +170,20 @@ export default function CommentUI({ partId }: CommentUIProps) {
       <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-muted-foreground/30" />
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/30" />
           </div>
         ) : comments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 px-4 text-center">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-muted/40 flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground/25" />
+          <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-muted/30 flex items-center justify-center">
+              <MessageSquare className="w-6 h-6 text-muted-foreground/20" />
             </div>
-            <p className="text-[11px] sm:text-sm text-muted-foreground/50">No comments yet</p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground/30">Be the first to share your thoughts</p>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground/60">No comments yet</p>
+              <p className="text-xs text-muted-foreground/30 mt-1">Start the conversation by sharing your thoughts below.</p>
+            </div>
           </div>
         ) : (
-          <div className="divide-y divide-border/15">
+          <div className="divide-y divide-border/30">
             {comments.map((c) => (
               <CommentRow
                 key={c.id} comment={c} own={user?.id === c.user_id}
@@ -166,53 +194,56 @@ export default function CommentUI({ partId }: CommentUIProps) {
         )}
       </div>
 
-      {/* Single input bar — handles both comments and replies */}
+      {/* Input Bar */}
       {user ? (
-        <div className="shrink-0 border-t border-border/40 bg-muted/15">
-          {/* Reply indicator — only shows when replying, click X to cancel */}
+        <div className="shrink-0 border-t border-border/40 bg-card p-3 sm:p-4 space-y-2">
+          {/* Reply Target Pill */}
           {replyTarget && (
-            <div className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 border-b border-primary/10 bg-primary/[0.03] animate-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-primary/10">
-                <AtSign className="w-2.5 h-2.5 text-primary/50" />
-                <span className="text-[10px] sm:text-[11px] text-primary/70 font-medium">{replyTarget.name}</span>
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/10 animate-in slide-in-from-bottom-1 duration-200">
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background shadow-sm border border-border/50">
+                <AtSign className="w-3 h-3 text-primary/60" />
+                <span className="text-xs text-primary/80 font-medium">{replyTarget.name}</span>
               </div>
               <button
                 onClick={() => setReplyTarget(null)}
-                className="ml-auto p-0.5 rounded hover:bg-muted/60 transition-colors"
+                className="ml-auto p-1 rounded-md hover:bg-muted transition-colors"
                 aria-label="Cancel reply"
               >
-                <X className="w-3 h-3 text-muted-foreground/50" />
+                <X className="w-3.5 h-3.5 text-muted-foreground/60" />
               </button>
             </div>
           )}
-          <div className="p-2.5 sm:p-3">
-            <div className="flex gap-1.5 sm:gap-2 items-end">
-              <Textarea
-                ref={inputRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder={replyTarget ? `Reply to ${replyTarget.name}...` : "Add a comment..."}
-                disabled={sending}
-                rows={1}
-                className="min-h-[34px] sm:min-h-[36px] max-h-[80px] resize-none text-xs sm:text-sm py-1.5 sm:py-2 px-2.5 sm:px-3 bg-background border-border/60 focus-visible:ring-primary/30"
-              />
-              <Button
-                size="icon"
-                onClick={handleSend}
-                disabled={sending || !draft.trim()}
-                className="shrink-0 h-[34px] w-[34px] sm:h-[36px] sm:w-[36px] rounded-lg"
-                aria-label="Send"
-              >
-                {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
-              </Button>
-            </div>
-            <p className="text-[9px] sm:text-[10px] text-muted-foreground/30 mt-1 px-0.5">Enter to send · Shift+Enter for new line</p>
+          
+          {/* Unified Input Area */}
+          <div className="flex gap-2 items-end bg-muted/30 p-1.5 rounded-xl border border-border/50 focus-within:border-primary/30 focus-within:ring-1 focus-within:ring-primary/10 transition-all">
+            <Textarea
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder={replyTarget ? `Reply to ${replyTarget.name}...` : "Add to the discussion..."}
+              disabled={sending}
+              rows={1}
+              className="min-h-[36px] max-h-[100px] resize-none text-sm py-2 px-3 bg-transparent border-0 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/40"
+            />
+            <Button
+              size="icon"
+              onClick={handleSend}
+              disabled={sending || !draft.trim()}
+              className="shrink-0 h-9 w-9 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm disabled:opacity-30"
+              aria-label="Send"
+            >
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            </Button>
           </div>
+          
+          <p className="text-[10px] text-muted-foreground/30 text-center pt-0.5">
+            Press <kbd className="px-1 py-0.5 rounded bg-muted/50 border border-border/50 font-mono text-[9px]">Enter</kbd> to send
+          </p>
         </div>
       ) : (
-        <div className="shrink-0 border-t border-border/40 p-3 sm:p-4 bg-muted/15 text-center">
-          <p className="text-[11px] sm:text-xs text-muted-foreground/50">Sign in to leave a comment</p>
+        <div className="shrink-0 border-t border-border/40 p-4 sm:p-6 bg-muted/10 text-center">
+          <p className="text-sm text-muted-foreground/50">Sign in to join the discussion</p>
         </div>
       )}
     </div>

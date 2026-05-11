@@ -89,11 +89,7 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
   const getAvatarUrl = (): string | null => {
     if (!profile?.avatar_url) return null;
     if (profile.avatar_url.startsWith('http')) return profile.avatar_url;
-    
-    const { data } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(profile.avatar_url);
-    
+    const { data } = supabase.storage.from('avatars').getPublicUrl(profile.avatar_url);
     return data?.publicUrl || null;
   };
 
@@ -158,21 +154,14 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button 
+                <button
                   className="h-9 w-9 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors overflow-hidden ring-2 ring-transparent hover:ring-primary/30"
                   aria-label="User menu"
                 >
                   {avatarUrl && !avatarError ? (
-                    <img
-                      src={avatarUrl}
-                      alt={displayName}
-                      className="h-full w-full object-cover"
-                      onError={() => setAvatarError(true)}
-                    />
+                    <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" onError={() => setAvatarError(true)} />
                   ) : (
-                    <span className="text-xs font-semibold text-muted-foreground uppercase">
-                      {displayName.slice(0, 2)}
-                    </span>
+                    <span className="text-xs font-semibold text-muted-foreground uppercase">{displayName.slice(0, 2)}</span>
                   )}
                 </button>
               </DropdownMenuTrigger>
@@ -180,16 +169,9 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
                 <div className="flex items-center gap-3 px-2.5 py-2.5">
                   <div className="h-10 w-10 rounded-full bg-muted shrink-0 overflow-hidden flex items-center justify-center">
                     {avatarUrl && !avatarError ? (
-                      <img
-                        src={avatarUrl}
-                        alt={displayName}
-                        className="h-full w-full object-cover"
-                        onError={() => setAvatarError(true)}
-                      />
+                      <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" onError={() => setAvatarError(true)} />
                     ) : (
-                      <span className="text-sm font-semibold text-muted-foreground uppercase">
-                        {displayName.slice(0, 2)}
-                      </span>
+                      <span className="text-sm font-semibold text-muted-foreground uppercase">{displayName.slice(0, 2)}</span>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -316,7 +298,12 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
 
 const Header = () => {
   const loc = useLocation();
-  if (loc.pathname.startsWith('/learn/') || loc.pathname.startsWith('/admin')) return null;
+  if (
+    loc.pathname.startsWith('/learn/') ||
+    loc.pathname.startsWith('/admin') ||
+    loc.pathname === '/auth' ||
+    loc.pathname.startsWith('/auth/')
+  ) return null;
   return <HeaderContent pathname={loc.pathname} />;
 };
 

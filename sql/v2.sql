@@ -407,24 +407,11 @@ REVOKE EXECUTE ON FUNCTION public.get_leaderboard FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_leaderboard TO authenticated;
 
 -- ---------------------------------------------------------------------
--- 6.1.1 FIX: Sync profiles.xp & coins when coin_ledger updates
+-- 6.1.1 FIX: REMOVED destructive sync_profile_from_ledger trigger.
+-- Profile totals are now safely managed directly by Edge Functions.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.sync_profile_from_ledger()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ 
-BEGIN
-  UPDATE public.profiles
-  SET 
-    xp = (SELECT COALESCE(SUM(xp), 0) FROM public.coin_ledger WHERE user_id = NEW.user_id),
-    coins = (SELECT COALESCE(SUM(coins), 0) FROM public.coin_ledger WHERE user_id = NEW.user_id)
-  WHERE user_id = NEW.user_id;
-  RETURN NEW;
-END;
- $$;
-
 DROP TRIGGER IF EXISTS trg_sync_profile_from_ledger ON public.coin_ledger;
-CREATE TRIGGER trg_sync_profile_from_ledger
-  AFTER INSERT ON public.coin_ledger
-  FOR EACH ROW EXECUTE FUNCTION public.sync_profile_from_ledger();
+DROP FUNCTION IF EXISTS public.sync_profile_from_ledger();
 
   
 -- =====================================================================

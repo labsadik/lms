@@ -431,13 +431,13 @@ export default function Learn() {
   const navigate = useNavigate();
 
   const [course, setCourse] = useState<Course | null>(null);
-  const [courseErr, setCourseErr] = useState(false);
+  const [courseErr, setCourseErr] = useState<boolean>(false);
   const [tree, setTree] = useState<Subject[]>([]);
   const [tests, setTests] = useState<TestItem[]>([]);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [testCompletions, setTestCompletions] = useState<Set<string>>(new Set());
-  const [enrolled, setEnrolled] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [enrolled, setEnrolled] = useState<boolean>(false);
+  const [ready, setReady] = useState<boolean>(false);
 
   const [view, setView] = useState<ViewLevel>("subjects");
   const [activeSubjectIdx, setActiveSubjectIdx] = useState<number | null>(null);
@@ -447,14 +447,16 @@ export default function Learn() {
     try { return new Set(JSON.parse(localStorage.getItem("lecture_likes") || "[]")); }
     catch { return new Set(); }
   });
-  const [commentOpen, setCommentOpen] = useState(false);
-  const [watchPct, setWatchPct] = useState(0);
 
-  const isPopRef = useRef(false);
-  const isRestoringRef = useRef(false);
+  const [commentOpen, setCommentOpen] = useState<boolean>(false);
+  const [watchPct, setWatchPct] = useState<number>(0);
+
+  const isPopRef = useRef<boolean>(false);
+  const isRestoringRef = useRef<boolean>(false);
   const STORAGE_KEY = `learn_state_${slug}`;
 
   const [skeletonView, setSkeletonView] = useState<ViewLevel>("subjects");
+
   useEffect(() => {
     if (!slug) return;
     try {
@@ -490,7 +492,7 @@ export default function Learn() {
       try {
         const [er, tr, tsr] = await Promise.all([
           user ? supabase.from("enrollments").select("id").eq("user_id", user.id).eq("course_id", course.id).maybeSingle() : null,
-          supabase.from("subjects").select("id,name,position,chapters(id,name,position,parts(id,name,kind,live_url,video_id,notes_url,duration,position,is_preview))").eq("course_id", course.id).order("position"),
+          supabase.from("subjects").select("id,name,position,chapters(id,name,position,parts(id,name,kind,live_url,video_id,notes_url,duration,position,is_preview)))").eq("course_id", course.id).order("position"),
           supabase.from("tests").select("id,title,scope,subject_id,chapter_id,duration_minutes").eq("course_id", course.id).eq("is_published", true),
         ]);
         if (!alive) return;
@@ -655,6 +657,7 @@ export default function Learn() {
 
   const handleMinute = useCallback(async (min: number) => {
     if (!user || !activePart || !course || activePart.kind !== "recorded") return;
+    if (min <= 0) return;
     try {
       const ok = await awardWatchedMinute(user.id, activePart.id, min, course.id);
       if (ok) toast.success("+1 coin 💰", { duration: 1200 });
@@ -665,7 +668,7 @@ export default function Learn() {
 
   /* ══════════════════════════════════════════════════════
      Error / Loading
-     ══════════════════════════════════════════════════════ */
+     ════════════════════════════════════════════════════════ */
   if (courseErr) {
     return (
       <div className="flex flex-col items-center justify-center h-[100dvh] gap-3 bg-background px-6 text-center">
@@ -678,13 +681,13 @@ export default function Learn() {
   }
   if (!course || !ready) return <ViewSkeleton view={skeletonView} />;
 
-  /* ══════════════════════════════════════════════════════
+  /* ════════════════════════════════════════════════════════
      RENDER
-     ══════════════════════════════════════════════════════ */
+     ════════════════════════════════════════════════════════ */
   return (
     <div className="flex flex-col h-[100dvh] bg-background">
 
-      {/* ─── HEADER — 15% taller on mobile in player view ─── */}
+      {/* ─── HEADER ─── */}
       <header
         className={cn(
           "shrink-0 flex items-center gap-2 px-4 border-b border-border/40 bg-card z-30",
@@ -705,7 +708,7 @@ export default function Learn() {
       {/* ─── CONTENT ─── */}
       <main className={cn(
         "flex-1 min-h-0",
-        view === "player" ? "flex flex-col overflow-hidden" : "overflow-y-auto scroll-smooth",
+        view === "player" ? "flex flex-col lg:flex-row overflow-hidden" : "overflow-y-auto scroll-smooth",
       )}>
 
         {/* ══════ SUBJECTS ══════ */}
@@ -856,97 +859,96 @@ export default function Learn() {
           </div>
         )}
 
-        {/* ══════ PLAYER — responsive for all devices ══════ */}
+        {/* ══════ PLAYER ══════ */}
         {view === "player" && activePart && (
-          <div className="flex flex-col flex-1 min-h-0">
-            {/* Video — fills available space on desktop, aspect-ratio on mobile */}
-            <div className="shrink-0 relative w-full bg-black aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0">
-              <div className="absolute inset-0">
-                {activePart.kind === "recorded" ? (
-                  <VideoPlayer
-                    key={activePart.id}
-                    video={{ id: activePart.video_id, title: activePart.name, duration: activePart.duration ?? undefined }}
-                    onProgress={setWatchPct} onComplete={handleComplete} onMinuteWatched={handleMinute}
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500 text-sm">
-                    Video not available
+          <>
+            <div className="flex flex-col min-h-0 w-full lg:flex-1">
+              <div className="shrink-0 relative w-full bg-black aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0">
+                <div className="absolute inset-0">
+                  {activePart.kind === "recorded" ? (
+                    <VideoPlayer
+                      key={activePart.id}
+                      video={{ id: activePart.video_id, title: activePart.name, duration: activePart.duration ?? undefined }}
+                      onProgress={setWatchPct} onComplete={handleComplete} onMinuteWatched={handleMinute}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 text-zinc-500 text-sm">
+                      Video not available
+                    </div>
+                  )}
+                </div>
+                {activePart.kind === "recorded" && watchPct > 0 && (
+                  <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/10 z-50">
+                    <div className="h-full bg-primary/80 transition-all duration-700 ease-out rounded-r-full" style={{ width: `${watchPct}%` }} />
                   </div>
                 )}
               </div>
-              {activePart.kind === "recorded" && watchPct > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/10 z-50">
-                  <div className="h-full bg-primary/80 transition-all duration-700 ease-out rounded-r-full" style={{ width: `${watchPct}%` }} />
-                </div>
-              )}
-            </div>
 
-            {/* Info + Actions */}
-            <div className="shrink-0 bg-card border-t border-border/40">
-              <div className="px-4 sm:px-5 lg:px-6 py-3 sm:py-4">
-                <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug">{activePart.name}</h2>
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1.5 text-xs sm:text-[13px] text-muted-foreground">
-                  <span className="font-semibold text-primary">{activePart.subjectName}</span>
-                  <span className="text-border/60">·</span>
-                  <span>{activePart.chapterName}</span>
-                  {activePart.duration && (
-                    <>
-                      <span className="text-border/60">·</span>
-                      <span className="flex items-center gap-0.5"><Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{activePart.duration}</span>
-                    </>
+              <div className="shrink-0 bg-card border-t border-border/40">
+                <div className="px-4 sm:px-5 lg:px-6 py-3 sm:py-4">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug">{activePart.name}</h2>
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1.5 text-xs sm:text-[13px] text-muted-foreground">
+                    <span className="font-semibold text-primary">{activePart.subjectName}</span>
+                    <span className="text-border/60">·</span>
+                    <span>{activePart.chapterName}</span>
+                    {activePart.duration && (
+                      <>
+                        <span className="text-border/60">·</span>
+                        <span className="flex items-center gap-0.5"><Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{activePart.duration}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="px-4 sm:px-5 lg:px-6 pb-3 sm:pb-4 flex items-center gap-2 flex-wrap">
+                  {completed.has(activePart.id) && (
+                    <span className="flex items-center gap-1.5 text-green-600 dark:text-green-500 font-semibold text-xs bg-green-50 dark:bg-green-900/20 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-lg border border-green-400 dark:border-green-700 h-9 sm:h-10">
+                      <CheckCircle2 className="w-3.5 h-3.5" />Done
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost" size="sm"
+                    onClick={() => toggleLike(activePart.id)}
+                    className={cn("h-9 sm:h-10 gap-1.5 text-xs sm:text-[13px] font-medium rounded-lg px-3 sm:px-3.5",
+                      likes.has(activePart.id) && "text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20")}
+                  >
+                    <Heart className={cn("w-3.5 h-3.5 sm:w-4 sm:h-4", likes.has(activePart.id) && "fill-current")} />
+                    {likes.has(activePart.id) ? "Liked" : "Like"}
+                  </Button>
+                  {activePart.notes_url && (
+                    <Button variant="outline" size="sm" asChild className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5">
+                      <a href={activePart.notes_url} target="_blank" rel="noopener noreferrer">
+                        <StickyNote className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Notes
+                      </a>
+                    </Button>
+                  )}
+                  {activePart.kind === "recorded" && (
+                    <Button
+                      variant={commentOpen ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => setCommentOpen((v: boolean) => !v)}
+                      className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      {commentOpen ? "Hide Comments" : "Comments"}
+                    </Button>
                   )}
                 </div>
               </div>
 
-              <div className="px-4 sm:px-5 lg:px-6 pb-3 sm:pb-4 flex items-center gap-2 flex-wrap">
-                {completed.has(activePart.id) && (
-                  <span className="flex items-center gap-1.5 text-green-600 dark:text-green-500 font-semibold text-xs bg-green-50 dark:bg-green-900/20 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-lg border border-green-400 dark:border-green-700 h-9 sm:h-10">
-                    <CheckCircle2 className="w-3.5 h-3.5" />Done
-                  </span>
-                )}
-                <Button
-                  variant="ghost" size="sm"
-                  onClick={() => toggleLike(activePart.id)}
-                  className={cn("h-9 sm:h-10 gap-1.5 text-xs sm:text-[13px] font-medium rounded-lg px-3 sm:px-3.5",
-                    likes.has(activePart.id) && "text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20")}
-                >
-                  <Heart className={cn("w-3.5 h-3.5 sm:w-4 sm:h-4", likes.has(activePart.id) && "fill-current")} />
-                  {likes.has(activePart.id) ? "Liked" : "Like"}
-                </Button>
-                {activePart.notes_url && (
-                  <Button variant="outline" size="sm" asChild className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5">
-                    <a href={activePart.notes_url} target="_blank" rel="noopener noreferrer">
-                      <StickyNote className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Notes
-                    </a>
-                  </Button>
-                )}
-                {activePart.kind === "recorded" && (
-                  <Button
-                    variant={commentOpen ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCommentOpen((v) => !v)}
-                    className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    {commentOpen ? "Hide" : "Comments"}
-                  </Button>
-                )}
-              </div>
+              {activePart.kind === "recorded" && commentOpen && (
+                <div className="flex lg:hidden flex-col flex-1 min-h-[50dvh] border-t border-border/40 bg-card overflow-hidden animate-in slide-in-from-bottom-2 duration-300">
+                  <CommentUI partId={activePart.id} />
+                </div>
+              )}
             </div>
 
-            {/* Comments — responsive height per viewport */}
             {activePart.kind === "recorded" && commentOpen && (
-              <div
-                className="shrink-0 w-full border-t border-border/40 bg-card animate-in slide-in-from-bottom-2 duration-300 overflow-y-auto scroll-smooth"
-                style={{
-                  // ~35% on mobile, ~40% on tablet/desktop, capped at 500px
-                  height: "max(180px, min(38dvh, 500px))",
-                }}
-              >
+              <div className="hidden lg:flex w-[340px] xl:w-[400px] shrink-0 border-l border-border/40 bg-card flex-col overflow-hidden animate-in slide-in-from-right-2 duration-300">
                 <CommentUI partId={activePart.id} />
               </div>
             )}
-          </div>
+          </>
         )}
       </main>
     </div>
