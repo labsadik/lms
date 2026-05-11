@@ -206,3 +206,48 @@
   background-size: 1000px 100%;
   animation: shimmer 2s infinite;
 }
+
+/* ===== Device-Specific Scroll & Padding ===== */
+@layer components {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Desktop (PC): Normal scrolling, Normal scrollbar, 0 extra padding */
+  .page-safe-bottom {
+    padding-bottom: 0;
+  }
+
+  /* Tablet & Mobile Only (< 1024px) */
+  @media screen and (max-width: 1023px) {
+    /* ✅ MINIMAL GAP: Safe area + 4px buffer. 
+       Removed the 72px navbar height to eliminate extra space.
+       Navbar will float over content, last item stays fully visible with tiny gap. */
+    .page-safe-bottom {
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4px);
+    }
+
+    /* ✅ Hide Scrollbar on Mobile/Tablet */
+    ::-webkit-scrollbar { display: none; }
+    html { scrollbar-width: none; }
+    body { -ms-overflow-style: none; }
+
+    /* ✅ Fix: Prevent header/top images from getting clipped or hidden when scrolling */
+    html, body {
+      overflow-x: hidden;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+  }
+
+  /* Navbar Container Height */
+  .mobile-nav-container {
+    height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .nav-touch {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}

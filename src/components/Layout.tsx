@@ -2,12 +2,32 @@ import { ReactNode } from 'react';
 import Header from './Header';
 import TabMobileNavbar from './tab-mobile-navbar';
 
-const Layout = ({ children, hideHeader = false }: { children: ReactNode; hideHeader?: boolean }) => {
+const Layout = ({
+  children,
+  hideHeader = false,
+}: {
+  children: ReactNode;
+  hideHeader?: boolean;
+}) => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {!hideHeader && <Header />}
-      <TabMobileNavbar />
-      <main className="flex-1 flex flex-col">{children}</main>
+    <div className="bg-background">
+      
+      {/* Fixed Header */}
+      {!hideHeader && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-background">
+          <Header />
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="pb-14">
+        {children}
+      </main>
+
+      {/* Fixed Bottom Navbar */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t">
+        <TabMobileNavbar />
+      </div>
     </div>
   );
 };
