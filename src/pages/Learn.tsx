@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import VideoPlayer from "@/components/VideoPlayer";
 import GamifyChip from "@/components/GamifyChip";
 import CommentUI from "@/components/CommentUI";
+import Notes from "@/components/Notes";
 import { Button } from "@/components/ui/button";
 import {
   Play, Clock, ChevronRight, ListChecks, Trophy,
@@ -268,10 +269,10 @@ function Card({
    Lecture Item
    ════════════════════════════════════════════════════════ */
 function LectureItem({
-  part, active, done, locked, onClick, liked, onLike, idx,
+  part, active, done, locked, onClick, liked, onLike, onNotesClick, idx,
 }: {
   part: ExtendedPart; active: boolean; done: boolean; locked: boolean;
-  onClick: () => void; liked: boolean; onLike: () => void; idx: number;
+  onClick: () => void; liked: boolean; onLike: () => void; onNotesClick: () => void; idx: number;
 }) {
   return (
     <div
@@ -311,14 +312,14 @@ function LectureItem({
       {!locked && (
         <div className="flex items-center shrink-0 gap-0.5">
           {part.notes_url && (
-            <a
-              href={part.notes_url} target="_blank" rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onNotesClick(); }}
               className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-muted/50 transition-colors sm:opacity-0 sm:group-hover:opacity-100"
-              aria-label="Notes"
+              aria-label="Open notes"
             >
               <StickyNote className="w-4 h-4 text-muted-foreground/40" />
-            </a>
+            </button>
           )}
           <button
             type="button"
@@ -457,6 +458,9 @@ export default function Learn() {
 
   const [commentOpen, setCommentOpen] = useState<boolean>(false);
   const [watchPct, setWatchPct] = useState<number>(0);
+
+  const [notesOpen, setNotesOpen] = useState<boolean>(false);
+  const [notesData, setNotesData] = useState<{ url: string; title: string } | null>(null);
 
   const isPopRef = useRef<boolean>(false);
   const isRestoringRef = useRef<boolean>(false);
@@ -669,6 +673,11 @@ export default function Learn() {
     setActivePart(part); setView("player"); setWatchPct(0); setCommentOpen(false);
   }, [isPartLocked]);
 
+  const openNotes = useCallback((url: string, title: string) => {
+    setNotesData({ url, title });
+    setNotesOpen(true);
+  }, []);
+
   const toggleLike = useCallback((partId: string) => {
     setLikes((prev) => {
       const next = new Set(prev);
@@ -870,7 +879,9 @@ export default function Learn() {
                     <LectureItem key={p.id} part={ext} active={activePart?.id === p.id}
                       done={completed.has(p.id)} locked={isPartLocked(p)}
                       onClick={() => openLecture(ext)} liked={likes.has(p.id)}
-                      onLike={() => toggleLike(p.id)} idx={i} />
+                      onLike={() => toggleLike(p.id)}
+                      onNotesClick={() => { if (ext.notes_url) openNotes(ext.notes_url, ext.name); }}
+                      idx={i} />
                   );
                 })}
               </div>
@@ -950,10 +961,13 @@ export default function Learn() {
                     {likes.has(activePart.id) ? "Liked" : "Like"}
                   </Button>
                   {activePart.notes_url && (
-                    <Button variant="outline" size="sm" asChild className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5">
-                      <a href={activePart.notes_url} target="_blank" rel="noopener noreferrer">
-                        <StickyNote className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Notes
-                      </a>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openNotes(activePart.notes_url!, activePart.name)}
+                      className="h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5"
+                    >
+                      <StickyNote className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Notes
                     </Button>
                   )}
                   {activePart.kind === "recorded" && (
@@ -985,6 +999,14 @@ export default function Learn() {
           </>
         )}
       </main>
+
+      {/* ─── NOTES MODAL ─── */}
+      <Notes
+        open={notesOpen}
+        onClose={() => setNotesOpen(false)}
+        url={notesData?.url || ""}
+        title={notesData?.title || "Notes"}
+      />
     </div>
   );
 }
