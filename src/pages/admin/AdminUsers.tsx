@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Shield, ShieldOff, ChevronDown, ChevronRight, Search, Plus, Loader2, Trash2, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
+import { Shield, ShieldOff, ChevronDown, ChevronRight, Search, Plus, Loader2, Trash2, AlertTriangle, CheckCircle2, Lock, Coins } from 'lucide-react';
 
 const AdminUsers = () => {
   const ADMIN_PASS = import.meta.env.VITE_ADMIN_ASSIGN_PASS;
@@ -119,7 +119,7 @@ const AdminUsers = () => {
         const totalParts = partIdMap[e.courses?.id] || [];
         const doneParts = totalParts.filter((pid) => completedPartIds.has(pid)).length;
         const pct = totalParts.length ? Math.round((doneParts / totalParts.length) * 100) : 0;
-        return { ...e, pct, totalParts: totalParts.length, doneParts }; // Added raw counts for better UI
+        return { ...e, pct, totalParts: totalParts.length, doneParts };
       });
 
       const totalSpent = items.reduce((s: number, e: any) => s + (e.amount_paid_inr || 0), 0);
@@ -153,7 +153,22 @@ const AdminUsers = () => {
       setDetails((prev) => {
         const d = prev[uid];
         if (!d || d.enrollments.some((e: any) => e.courses?.id === cid)) return prev;
-        return { ...prev, [uid]: { ...d, enrollments: [...d.enrollments, { id: crypto.randomUUID(), enrolled_at: new Date().toISOString(), amount_paid_inr: 0, promocode: 'ADMIN_GRANT', courses: { id: cid, title: course?.title || cid, slug: '' }, pct: 0, totalParts: 0, doneParts: 0 }] } };
+        return { 
+          ...prev, 
+          [uid]: { 
+            ...d, 
+            enrollments: [...d.enrollments, { 
+              id: crypto.randomUUID(), 
+              enrolled_at: new Date().toISOString(), 
+              amount_paid_inr: 0, 
+              promocode: 'ADMIN_GRANT', 
+              courses: { id: cid, title: course?.title || cid, slug: '' }, 
+              pct: 0, 
+              totalParts: 0, 
+              doneParts: 0 
+            }] 
+          } 
+        };
       });
     } catch (err: any) {
       toast.error(err.message || 'Failed to grant course', { icon: <AlertTriangle className="h-4 w-4 text-red-500" /> });
@@ -276,8 +291,8 @@ const AdminUsers = () => {
                     {u.display_name || 'unnamed'}
                     {u.isAdmin && <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold">ADMIN</span>}
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {u.email || '—'} {u.phone ? `· ${u.phone}` : ''} · Lvl {u.level} · {u.xp} XP · ₹{u.coins.toLocaleString()}
+                  <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                    {u.email || '—'} {u.phone ? `· ${u.phone}` : ''} · Lvl {u.level} · {u.xp} XP · <Coins className="w-3 h-3 inline text-yellow-500" />{u.coins.toLocaleString()}
                   </div>
                 </div>
 
@@ -330,7 +345,6 @@ const AdminUsers = () => {
                                 </div>
                                 
                                 <div className="flex items-center gap-2 shrink-0">
-                                  {/* Always visible progress stats */}
                                   <div className="text-right">
                                     <span className="text-xs font-bold text-primary">{e.pct}%</span>
                                     <span className="text-[10px] text-muted-foreground block leading-none">({e.doneParts}/{e.totalParts})</span>
@@ -342,7 +356,6 @@ const AdminUsers = () => {
                                 </div>
                               </div>
                               
-                              {/* Always visible full-width progress bar */}
                               <div className="w-full h-1.5 bg-muted rounded-full mt-2 overflow-hidden">
                                 <div 
                                   className={`h-full rounded-full transition-all duration-300 ${e.pct === 100 ? 'bg-green-500' : 'bg-primary'}`} 
@@ -354,7 +367,6 @@ const AdminUsers = () => {
                         </div>
                       )}
                       
-                      {/* Grant Course UI */}
                       <div className="mt-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                         <div className="flex-1 min-w-0">
                           <Select value={grantCourse[u.user_id] || undefined} onValueChange={(v) => setGrantCourse({ ...grantCourse, [u.user_id]: v })}>
@@ -397,7 +409,7 @@ const AdminUsers = () => {
               )}
             </Card>
           ))}
-          <div className="h-6" /> {/* Bottom padding */}
+          <div className="h-6" />
         </div>
       </div>
 

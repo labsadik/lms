@@ -32,7 +32,7 @@ export function useComments(partId: string | null): UseCommentsReturn {
   const sentIds = useRef<Set<string>>(new Set());
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  // Thread raw flat list into nested structure
+  // ── Thread flat list → nested structure ──
   const comments = useMemo(() => {
     const map = new Map<string, Comment>();
     const roots: Comment[] = [];
@@ -59,77 +59,106 @@ export function useComments(partId: string | null): UseCommentsReturn {
     return roots;
   }, [rawComments]);
 
-  // Fetch existing comments
+  // ── FETCH + REALTIME IN ONE EFFECT ──
   useEffect(() => {
     if (!partId) return;
-    let alive = true;
 
-    (async () => {
+    let cancelled = false;
+
+    const init = async () => {
+      // 1. AWAIT full channel removal — this is critical!
+      //    removeChannel() returns a Promise that resolves
+      //    only after the WebSocket cleanly unsubscribes.
+      //    Without await, React StrictMode's second mount
+      //    creates a duplicate channel name before the
+      //    old one is destroyed → "cannot add postgres_changes
+      //    after subscribe()" error.
+      if (channelRef.current) {
+        const oldChannel = channelRef.current;
+        channelRef.current = null; // clear ref immediately to prevent double-cleanup
+        await supabase.removeChannel(oldChannel);
+      }
+
+      // 2. Fetch existing comments
       setLoading(true);
       const { data, error } = await supabase
         .from("comments")
-        .select("id, user_id, parent_id, display_name, avatar_url, message, created_at")
+        .select(
+          "id, user_id, parent_id, display_name, avatar_url, message, created_at"
+        )
         .eq("part_id", partId)
         .order("created_at", { ascending: true })
         .limit(200);
 
-      if (alive) {
-        if (error) console.error(error);
-        else setRawComments((data as Comment[]) ?? []);
-        setLoading(false);
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Fetch comments error:", error);
+      } else {
+        setRawComments((data as Comment[]) ?? []);
       }
-    })();
+      setLoading(false);
 
-    return () => {
-      alive = false;
-    };
-  }, [partId]);
+      // 3. Abort if cleanup ran during fetch
+      if (cancelled) return;
 
-  // Realtime new comments
-  useEffect(() => {
-    if (!partId) return;
+      // 4. Subscribe to realtime — ALL .on() BEFORE .subscribe()
+      const channel: RealtimeChannel = supabase
+        .channel(`comments:${partId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "comments",
+            filter: `part_id=eq.${partId}`,
+          },
+          (payload) => {
+            if (cancelled) return;
+            const c = payload.new as Comment;
 
-    // Clean up any existing channel from a previous render/race
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
+            // Skip if we already optimistically added this comment
+            if (sentIds.current.has(c.id)) {
+              sentIds.current.delete(c.id);
+              return;
+            }
 
-    // Unique channel name prevents collision on StrictMode double-mount
-    // or rapid partId changes before cleanup finishes
-    const channelName = `comments:${partId}:${Date.now()}`;
-
-    const channel = supabase
-      .channel(channelName, { config: { broadcast: { self: false } } })
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "comments",
-          filter: `part_id=eq.${partId}`,
-        },
-        (payload) => {
-          const c = payload.new as Comment;
-          if (sentIds.current.has(c.id)) {
-            sentIds.current.delete(c.id);
-            return;
+            // Dedup guard — prevents double-insert from
+            // fetch completing at same moment as realtime fires
+            setRawComments((prev) =>
+              prev.some((existing) => existing.id === c.id)
+                ? prev
+                : [...prev, c]
+            );
           }
-          setRawComments((prev) => [...prev, c]);
-        }
-      )
-      .subscribe();
+        )
+        .subscribe((status, err) => {
+          if (status === "CHANNEL_ERROR") {
+            console.error("[RT] Channel error:", err);
+          }
+        });
 
-    channelRef.current = channel;
+      // Only store if not cancelled during subscribe
+      if (!cancelled) {
+        channelRef.current = channel;
+      }
+    };
 
+    init();
+
+    // ── CLEANUP ──
     return () => {
+      cancelled = true;
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        const oldChannel = channelRef.current;
         channelRef.current = null;
+        // Fire-and-forget on unmount (can't await in cleanup)
+        supabase.removeChannel(oldChannel);
       }
     };
   }, [partId]);
 
+  // ── SEND COMMENT ──
   const sendComment = useCallback(
     async (text: string, parentId: string | null = null): Promise<boolean> => {
       if (!user || !session?.access_token || !partId) {
@@ -159,6 +188,8 @@ export function useComments(partId: string | null): UseCommentsReturn {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed");
 
+        // Optimistic insert — add immediately, skip when
+        // realtime echo arrives via sentIds guard
         if (json.comment?.id) {
           sentIds.current.add(json.comment.id);
           setRawComments((prev) =>
@@ -171,7 +202,9 @@ export function useComments(partId: string | null): UseCommentsReturn {
         return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed";
-        toast.error(msg.includes("Not enrolled") ? "Enroll to comment" : msg);
+        toast.error(
+          msg.includes("Not enrolled") ? "Enroll to comment" : msg
+        );
         return false;
       } finally {
         setSending(false);

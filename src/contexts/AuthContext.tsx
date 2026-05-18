@@ -35,11 +35,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       setUser(s?.user ?? null);
-      if (s?.user) checkAdmin(s.user.id);
-      setLoading(false);
+      if (s?.user) {
+        await checkAdmin(s.user.id); // ← WAIT for this to finish
+      }
+      setLoading(false);              // ← NOW it's safe
     });
 
     return () => subscription.unsubscribe();
