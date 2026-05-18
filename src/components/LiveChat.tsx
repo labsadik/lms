@@ -1,20 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  limit,
-  Timestamp,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { ably } from '@/lib/ably';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Radio, ChevronDown, ShieldAlert, X, AlertTriangle, Timer } from 'lucide-react';
+import { Send, Radio, ChevronDown, ShieldAlert, X, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /* ── Types ── */
@@ -24,7 +14,7 @@ interface ChatMessage {
   displayName: string;
   avatarUrl: string | null;
   message: string;
-  createdAt: Timestamp | null;
+  createdAt: number | null; // Ably timestamp = milliseconds
 }
 
 interface LiveChatProps {
@@ -33,7 +23,6 @@ interface LiveChatProps {
 
 /* ── Constants ── */
 const MAX_CHAR_LIMIT = 250;
-const SEND_COOLDOWN_MS = 3000; // 3 seconds
 
 const CHAT_COLORS = [
   '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b',
@@ -69,15 +58,15 @@ function getInitial(name: string): string {
   return name?.charAt(0)?.toUpperCase() || '?';
 }
 
-function formatTime(ts: Timestamp | null): string {
+// Adapted for Ably: timestamp is a number (ms) instead of Firestore Timestamp
+function formatTime(ts: number | null): string {
   if (!ts) return '';
-  const d = ts.toDate();
-  const diff = Math.floor((Date.now() - d.getTime()) / 60000);
+  const diff = Math.floor((Date.now() - ts) / 60000);
   if (diff < 1) return 'now';
   if (diff < 60) return `${diff}m`;
   const h = Math.floor(diff / 60);
   if (h < 24) return `${h}h`;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function validateMessage(text: string): string | null {
@@ -98,18 +87,34 @@ function validateMessage(text: string): string | null {
   return null;
 }
 
+// Ably channel names only allow: a-zA-Z0-9 . _ : -
+function getChannelName(partId: string): string {
+  return `live-chats:${partId.replace(/[^a-zA-Z0-9._:-]/g, '_')}`;
+}
+
+// Convert Ably message → our ChatMessage type
+function toChatMsg(msg: any): ChatMessage {
+  return {
+    id: msg.id,
+    userId: msg.data.userId,
+    displayName: msg.data.displayName,
+    avatarUrl: msg.data.avatarUrl,
+    message: msg.data.message,
+    createdAt: msg.timestamp,
+  };
+}
+
 /* ════════════════════════════════════════════════════════
    LIVE CHAT COMPONENT
    ════════════════════════════════════════════════════════ */
 export default function LiveChat({ partId }: LiveChatProps) {
-  const { user } = useAuth();
+  const { user } = useAuth(); // Supabase Auth
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMsg, setNewMsg] = useState('');
   const [connected, setConnected] = useState(false);
-  const [permissionError, setPermissionError] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const [profile, setProfile] = useState<{ display_name: string | null; avatar_url: string | null } | null>(null);
 
-  /* Smart scroll */
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -117,32 +122,25 @@ export default function LiveChat({ partId }: LiveChatProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const prevLenRef = useRef(0);
   const isAtBottomRef = useRef(true);
-  
+
   const [showPolicies, setShowPolicies] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  /* 3-Second Send Cooldown */
-  const [sendCooldown, setSendCooldown] = useState(false);
-  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isSending, setIsSending] = useState(false); // State for send button loader
 
   useEffect(() => { isAtBottomRef.current = isAtBottom; }, [isAtBottom]);
 
-  useEffect(() => {
-    return () => {
-      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
-    };
-  }, []);
-
-  if (!db) {
+  /* ── Fallback if Ably not configured ── */
+  if (!ably) {
     return (
       <div className="flex flex-col h-full items-center justify-center text-center p-6 gap-3">
         <Radio className="w-8 h-8 text-muted-foreground/20" />
         <p className="text-sm text-muted-foreground font-medium">Live chat unavailable</p>
-        <p className="text-xs text-muted-foreground/60">Firebase is not configured.</p>
+        <p className="text-xs text-muted-foreground/60">Ably is not configured.</p>
       </div>
     );
   }
 
+  /* ── Load Supabase Profile (Auth handled by Supabase) ── */
   useEffect(() => {
     if (!user) return;
     let alive = true;
@@ -157,38 +155,86 @@ export default function LiveChat({ partId }: LiveChatProps) {
     return () => { alive = false; };
   }, [user?.id]);
 
-  /* ── Firestore Real-time Listener ── */
+  /* ── Ably Real-time Subscription + History ── */
   useEffect(() => {
-    const messagesRef = collection(db!, 'live_chats', partId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'), limit(300));
+    if (!ably) return;
+    
+    const channelName = getChannelName(partId);
+    const channel = ably.channels.get(channelName);
 
-    const unsub = onSnapshot(q, (snap) => {
-      const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as ChatMessage[];
-      setMessages(msgs);
-      setConnected(true);
-      setPermissionError(false);
-
-      // Track unread only if user scrolled up
-      if (!isAtBottomRef.current && msgs.length > prevLenRef.current) {
-        setUnreadCount((c) => c + (msgs.length - prevLenRef.current));
+    // ✅ FIX: Suppress React 18 Strict Mode race condition errors
+    const suppressStrictModeErrors = (stateChange: any) => {
+      if (stateChange.reason?.message?.includes('superseded')) {
+        stateChange.reason = null; 
       }
-      prevLenRef.current = msgs.length;
-    }, (err) => {
-      console.error('Firestore snapshot error:', err);
-      setConnected(false);
-      if (err.code === 'permission-denied') setPermissionError(true);
+    };
+    channel.on(suppressStrictModeErrors);
+
+    // Message handler
+    const onMessage = (msg: any) => {
+      const chatMsg = toChatMsg(msg);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === chatMsg.id)) return prev;
+        const updated = [...prev, chatMsg];
+        return updated.length > 300 ? updated.slice(-300) : updated;
+      });
+    };
+
+    // Subscribe FIRST to not miss any real-time messages
+    channel.subscribe('chat-message', onMessage);
+
+    // Load message history
+    channel.history({ limit: 300, direction: 'forwards' }).then((page) => {
+      const historyMsgs = page.items.map(toChatMsg);
+
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newHistoryMsgs = historyMsgs.filter((m) => !existingIds.has(m.id));
+        const allMsgs = [...newHistoryMsgs, ...prev];
+        allMsgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        return allMsgs.slice(-300);
+      });
+
+      setConnected(true);
+      setConnectionError(false);
+    }).catch((err) => {
+      console.error('Ably history error:', err);
+      setConnectionError(true);
     });
 
-    return () => unsub();
+    // Track Ably connection state
+    const onConnectionChange = (stateChange: any) => {
+      setConnected(stateChange.current === 'connected');
+      if (stateChange.current === 'failed' || stateChange.current === 'suspended') {
+        setConnectionError(true);
+      }
+    };
+    ably.connection.on(onConnectionChange);
+    setConnected(ably.connection.state === 'connected');
+
+    return () => {
+      channel.off(suppressStrictModeErrors);
+      channel.unsubscribe('chat-message', onMessage);
+      ably.connection.off(onConnectionChange);
+      // 🚨 DO NOT ADD channel.detach() HERE! That causes the superseded error.
+    };
   }, [partId]);
 
-  /* ── Auto-scroll when at bottom ── */
+  /* ── Auto-scroll to bottom ── */
   useEffect(() => {
     if (isAtBottom) {
       endRef.current?.scrollIntoView({ behavior: 'smooth' });
       setUnreadCount(0);
     }
   }, [messages.length, isAtBottom]);
+
+  /* ── Track unread count ── */
+  useEffect(() => {
+    if (!isAtBottomRef.current && messages.length > prevLenRef.current) {
+      setUnreadCount((c) => c + (messages.length - prevLenRef.current));
+    }
+    prevLenRef.current = messages.length;
+  }, [messages.length]);
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
@@ -204,11 +250,11 @@ export default function LiveChat({ partId }: LiveChatProps) {
     setUnreadCount(0);
   }, []);
 
-  /* ── Send Message (with 3s cooldown) ── */
+  /* ── Send Message (Requires Supabase User) ── */
   const sendMessage = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = newMsg.trim();
-    if (!user || !text || sendCooldown) return; 
+    if (!user || !text || isSending) return; // Prevent double-sending
 
     const error = validateMessage(text);
     if (error) {
@@ -219,36 +265,35 @@ export default function LiveChat({ partId }: LiveChatProps) {
 
     setNewMsg('');
     setValidationError(null);
-    
-    // Start 3-second cooldown
-    setSendCooldown(true);
-    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
-    cooldownTimerRef.current = setTimeout(() => setSendCooldown(false), SEND_COOLDOWN_MS);
+    setIsSending(true); // Start 3-dot loader
 
     try {
-      const messagesRef = collection(db!, 'live_chats', partId, 'messages');
-      await addDoc(messagesRef, {
-        userId: user.id,
+      const channel = ably!.channels.get(getChannelName(partId));
+      await channel.publish('chat-message', {
+        userId: user.id, // Save Supabase User ID
         displayName: profile?.display_name || (user.email ? user.email.split('@')[0] : 'Anonymous'),
         avatarUrl: profile?.avatar_url || null,
         message: text,
-        createdAt: serverTimestamp(),
       });
     } catch (err: any) {
       console.error('Send failed:', err);
-      setNewMsg(text); 
-      if (err.code === 'permission-denied') {
-        setValidationError('⚠️ Firebase permission denied. Check Rules.');
-        setPermissionError(true);
+      setNewMsg(text); // Restore text on failure
+      if (err.code === 401 || err.code === 403) {
+        setValidationError('⚠️ Ably authentication failed. Check your API key.');
+      } else if (err.code === 429) {
+        setValidationError('⚠️ Rate limit exceeded. Please wait a moment.');
       } else {
-        setValidationError('⚠️ Network error. Ad-blocker might be blocking it.');
+        setValidationError('⚠️ Failed to send message. Please try again.');
       }
       setTimeout(() => setValidationError(null), 4000);
+    } finally {
+      setIsSending(false); // Stop 3-dot loader
     }
-  }, [user, newMsg, partId, profile, sendCooldown]);
+  }, [user, newMsg, partId, profile, isSending]);
 
   return (
     <div className="flex flex-col h-full bg-card relative">
+      {/* ── Policies Modal ── */}
       {showPolicies && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowPolicies(false)}>
           <div className="bg-card rounded-2xl shadow-2xl border border-border max-w-xs w-[90%] max-h-[80%] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -282,6 +327,7 @@ export default function LiveChat({ partId }: LiveChatProps) {
         </div>
       )}
 
+      {/* ── Header ── */}
       <div className="shrink-0 px-3 py-2.5 border-b border-border/40 bg-card flex items-center justify-between z-20">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
@@ -294,76 +340,68 @@ export default function LiveChat({ partId }: LiveChatProps) {
           <button onClick={() => setShowPolicies(true)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground/50 hover:text-red-500 transition-colors" title="Community Guidelines">
             <ShieldAlert className="w-3.5 h-3.5" />
           </button>
-          <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide', permissionError ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : connected ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400')}>
-            {permissionError ? 'Error' : connected ? 'Live' : 'Connecting…'}
+          <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide', connectionError ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : connected ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400')}>
+            {connectionError ? 'Error' : connected ? 'Live' : 'Connecting…'}
           </span>
         </div>
       </div>
 
-      {permissionError ? (
+      {/* ── Connection Error State ── */}
+      {connectionError ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center p-6 gap-3 bg-red-50/50 dark:bg-red-950/10">
           <AlertTriangle className="w-8 h-8 text-red-500" />
-          <p className="text-sm font-semibold text-red-600 dark:text-red-400">Permission Denied</p>
+          <p className="text-sm font-semibold text-red-600 dark:text-red-400">Connection Error</p>
           <p className="text-xs text-muted-foreground max-w-[250px] leading-relaxed">
-            Firebase Security Rules are blocking the chat. Please update your rules in the Firebase Console.
+            Unable to connect to Ably. Please check your API key and internet connection.
           </p>
         </div>
       ) : (
-        <div className="flex-1 relative min-h-0">
-          <div 
-            ref={containerRef} 
-            onScroll={handleScroll} 
-            className="h-full overflow-y-auto px-2 py-2 space-y-1 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" 
-            style={{ scrollbarWidth: 'none' }}
-          >
-            {messages.length === 0 && connected && (
-              <div className="flex flex-col items-center justify-center h-full text-center py-16 gap-2 px-4">
-                <div className="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center mb-1">
-                  <Radio className="w-6 h-6 text-muted-foreground/25" />
-                </div>
-                <p className="text-xs text-muted-foreground font-medium">Waiting for messages…</p>
-                <p className="text-[11px] text-muted-foreground/50">Be the first to say something! 👋</p>
+        /* ── Messages ── */
+        <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-2 py-2 space-y-1 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ scrollbarWidth: 'none' }}>
+          {messages.length === 0 && connected && (
+            <div className="flex flex-col items-center justify-center h-full text-center py-16 gap-2 px-4">
+              <div className="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center mb-1">
+                <Radio className="w-6 h-6 text-muted-foreground/25" />
               </div>
-            )}
-
-            {messages.map((msg) => (
-              <div key={msg.id} className="group flex items-start gap-2 py-1.5 px-2 rounded-xl hover:bg-muted/30 transition-colors">
-                {msg.avatarUrl ? (
-                  <img src={msg.avatarUrl} alt={msg.displayName} className="w-6 h-6 rounded-full shrink-0 object-cover mt-0.5 ring-1 ring-border/20" />
-                ) : (
-                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold text-white mt-0.5" style={{ backgroundColor: getUserColor(msg.userId) }}>
-                    {getInitial(msg.displayName)}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-[11px] font-semibold truncate max-w-[100px] sm:max-w-[130px]" style={{ color: getUserColor(msg.userId) }}>
-                      {msg.displayName}
-                    </span>
-                    <span className="text-[9px] text-muted-foreground/40 shrink-0 tabular-nums">{formatTime(msg.createdAt)}</span>
-                  </div>
-                  <p className="text-[12px] sm:text-[13px] text-foreground/90 break-words leading-relaxed">{msg.message}</p>
-                </div>
-              </div>
-            ))}
-            <div ref={endRef} />
-          </div>
-
-          {/* Floating Arrow / Scroll to Bottom Button */}
-          {!isAtBottom && unreadCount > 0 && (
-            <div className="absolute bottom-4 right-4 z-20">
-              <button
-                onClick={scrollToBottom}
-                className="flex items-center gap-1.5 bg-primary text-primary-foreground h-9 px-3 rounded-full text-xs font-semibold shadow-lg hover:bg-primary/90 transition-all animate-in fade-in zoom-in-95 duration-200"
-              >
-                <ChevronDown className="w-4 h-4" />
-                {unreadCount} new
-              </button>
+              <p className="text-xs text-muted-foreground font-medium">Waiting for messages…</p>
+              <p className="text-[11px] text-muted-foreground/50">Be the first to say something! 👋</p>
             </div>
           )}
+
+          {messages.map((msg) => (
+            <div key={msg.id} className="group flex items-start gap-2 py-1.5 px-2 rounded-xl hover:bg-muted/30 transition-colors">
+              {msg.avatarUrl ? (
+                <img src={msg.avatarUrl} alt={msg.displayName} className="w-6 h-6 rounded-full shrink-0 object-cover mt-0.5 ring-1 ring-border/20" />
+              ) : (
+                <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold text-white mt-0.5" style={{ backgroundColor: getUserColor(msg.userId) }}>
+                  {getInitial(msg.displayName)}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-semibold truncate max-w-[100px] sm:max-w-[130px]" style={{ color: getUserColor(msg.userId) }}>
+                    {msg.displayName}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/40 shrink-0 tabular-nums">{formatTime(msg.createdAt)}</span>
+                </div>
+                <p className="text-[12px] sm:text-[13px] text-foreground/90 break-words leading-relaxed">{msg.message}</p>
+              </div>
+            </div>
+          ))}
+          <div ref={endRef} />
         </div>
       )}
 
+      {/* ── Unread Badge ── */}
+      {!isAtBottom && unreadCount > 0 && !connectionError && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20">
+          <button onClick={scrollToBottom} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3 py-1.5 rounded-full text-[11px] font-semibold shadow-lg hover:bg-primary/90 transition-colors animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <ChevronDown className="w-3 h-3" /> {unreadCount} new
+          </button>
+        </div>
+      )}
+
+      {/* ── Input Area ── */}
       {user ? (
         <div className="shrink-0 border-t border-border/40 bg-card p-2 sm:p-2.5">
           {validationError && (
@@ -376,28 +414,29 @@ export default function LiveChat({ partId }: LiveChatProps) {
               ref={inputRef}
               value={newMsg}
               onChange={(e) => { if (e.target.value.length <= MAX_CHAR_LIMIT) setNewMsg(e.target.value); if (validationError) setValidationError(null); }}
-              placeholder={sendCooldown ? "Wait 3s..." : "Say something…"}
+              placeholder="Say something…"
               className="h-9 sm:h-10 text-xs sm:text-sm rounded-lg border-border/40 bg-muted/30 focus-visible:ring-1 flex-1 min-w-0"
-              disabled={sendCooldown}
             />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={!newMsg.trim() || sendCooldown || permissionError}
-              className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg relative"
+            <Button 
+              type="submit" 
+              size="icon" 
+              disabled={!newMsg.trim() || connectionError || isSending} 
+              className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg"
             >
-              {sendCooldown ? (
-                <Timer className="w-4 h-4 text-muted-foreground" />
+              {isSending ? (
+                /* ✅ 3-Dot Bouncing Loader */
+                <div className="flex items-center justify-center gap-[3px]">
+                  <span className="w-[4px] h-[4px] bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                  <span className="w-[4px] h-[4px] bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                  <span className="w-[4px] h-[4px] bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                </div>
               ) : (
                 <Send className="w-4 h-4" />
               )}
             </Button>
           </form>
-
           <div className="flex items-center justify-between mt-1 px-1">
-            <span className="text-[9px] text-muted-foreground/40 truncate max-w-[60%]">
-              {profile?.display_name || user.email?.split('@')[0]}
-            </span>
+            <span className="text-[9px] text-muted-foreground/40 truncate max-w-[60%]">{profile?.display_name || user.email?.split('@')[0]}</span>
             <span className={cn('text-[9px] tabular-nums shrink-0', newMsg.length > MAX_CHAR_LIMIT * 0.9 ? 'text-amber-500 font-semibold' : 'text-muted-foreground/30')}>
               {newMsg.length}/{MAX_CHAR_LIMIT}
             </span>
