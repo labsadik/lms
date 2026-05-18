@@ -798,6 +798,13 @@ DROP TRIGGER IF EXISTS trg_award_badges ON public.coin_ledger;
 CREATE TRIGGER trg_award_badges
   AFTER INSERT ON public.coin_ledger
   FOR EACH ROW EXECUTE FUNCTION public.handle_badge_awards();
+  
+-- =====================================================================
+-- Added livechat at lectures
+-- =====================================================================
+ALTER TABLE public.parts
+ADD COLUMN IF NOT EXISTS live_chat_enabled boolean NOT NULL DEFAULT false;
+
 
 -- =====================================================================
 -- DONE — promote your first admin manually:

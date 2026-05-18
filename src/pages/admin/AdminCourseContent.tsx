@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, ChevronLeft, Edit, ChevronDown, ChevronRight, BookOpen, FolderOpen, Video } from 'lucide-react';
+import { Plus, Trash2, ChevronLeft, Edit, ChevronDown, ChevronRight, BookOpen, FolderOpen, Video, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 // Types
 interface Part {
@@ -20,6 +21,7 @@ interface Part {
   position: number;
   is_preview: boolean;
   kind: 'recorded' | 'live';
+  live_chat_enabled: boolean;
 }
 
 interface Chapter {
@@ -48,6 +50,7 @@ interface PartForm {
   notes_url: string;
   duration: string;
   is_preview: boolean;
+  live_chat_enabled: boolean;
 }
 
 interface PartDialogState {
@@ -64,6 +67,7 @@ const EMPTY_PART_FORM: PartForm = {
   notes_url: '',
   duration: '',
   is_preview: false,
+  live_chat_enabled: false,
 };
 
 const INITIAL_PART_DIALOG: PartDialogState = {
@@ -97,7 +101,7 @@ const AdminCourseContent = () => {
       supabase.from('courses').select('*').eq('id', courseId).maybeSingle(),
       supabase
         .from('subjects')
-        .select('id, name, position, chapters(id, name, position, parts(id, name, video_id, notes_url, duration, position, is_preview, kind))')
+        .select('id, name, position, chapters(id, name, position, parts(id, name, video_id, notes_url, duration, position, is_preview, kind, live_chat_enabled))')
         .eq('course_id', courseId)
         .order('position'),
     ]);
@@ -107,10 +111,10 @@ const AdminCourseContent = () => {
     const sorted: Subject[] = (subjectsRes.data || []).map((s) => ({
       ...s,
       chapters: (s.chapters || [])
-        .sort((a, b) => a.position - b.position)
-        .map((ch) => ({
+        .sort((a: any, b: any) => a.position - b.position)
+        .map((ch: any) => ({
           ...ch,
-          parts: (ch.parts || []).sort((a, b) => a.position - b.position),
+          parts: (ch.parts || []).sort((a: any, b: any) => a.position - b.position),
         })),
     }));
 
@@ -190,6 +194,7 @@ const AdminCourseContent = () => {
             notes_url: editing.notes_url || '',
             duration: editing.duration || '',
             is_preview: editing.is_preview,
+            live_chat_enabled: editing.live_chat_enabled ?? false,
           }
         : { ...EMPTY_PART_FORM }
     );
@@ -214,6 +219,8 @@ const AdminCourseContent = () => {
       notes_url: partForm.notes_url || null,
       duration: partForm.duration || null,
       is_preview: partForm.is_preview,
+      // Force false if not live
+      live_chat_enabled: partForm.kind === 'live' ? partForm.live_chat_enabled : false,
     };
 
     const req = partDialog.editing?.id
@@ -392,12 +399,21 @@ const AdminCourseContent = () => {
                                 <div className="flex items-center gap-2 min-w-0 flex-1">
                                   <Video className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                   <span className="truncate font-medium">{part.name}</span>
-                                  <span className="text-[10px] text-muted-foreground truncate shrink-0 hidden sm:inline">
-                                    ({part.kind === 'live' ? '🔴 Live' : '📹 Rec'}: {part.video_id})
-                                  </span>
-                                  {part.is_preview && (
-                                    <span className="text-[10px] font-bold text-primary shrink-0">Guest</span>
-                                  )}
+                                  
+                                  {/* Tags */}
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                                      ({part.kind === 'live' ? '🔴 Live' : '📹 Rec'}: {part.video_id})
+                                    </span>
+                                    {part.is_preview && (
+                                      <span className="text-[10px] font-bold text-primary">Guest</span>
+                                    )}
+                                    {part.kind === 'live' && part.live_chat_enabled && (
+                                      <span className="flex items-center gap-0.5 text-[10px] font-bold text-red-500">
+                                        <MessageCircle className="w-3 h-3" /> Chat
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                   <Button
@@ -498,15 +514,41 @@ const AdminCourseContent = () => {
               />
             </div>
 
+            {/* Recorded / Live Toggle */}
             <div className="flex items-center gap-2 p-2.5 rounded-md bg-secondary/40 border border-border">
               <Switch
                 checked={partForm.kind === 'live'}
-                onCheckedChange={(v) => setPartForm((prev) => ({ ...prev, kind: v ? 'live' : 'recorded' }))}
+                onCheckedChange={(v) => 
+                  setPartForm((prev) => ({ 
+                    ...prev, 
+                    kind: v ? 'live' : 'recorded',
+                    // Automatically disable chat if switching back to recorded
+                    live_chat_enabled: v ? prev.live_chat_enabled : false
+                  }))
+                }
               />
               <Label className="cursor-pointer">
                 {partForm.kind === 'live' ? '🔴 Live class (FastPix)' : '📹 Recorded video (Bunny)'}
               </Label>
             </div>
+
+            {/* Live Chat Toggle (Visible ONLY for Live kind) */}
+            {partForm.kind === 'live' && (
+              <div className={cn(
+                "flex items-center gap-2 p-2.5 rounded-md border transition-all duration-200",
+                "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
+              )}>
+                <Switch
+                  checked={partForm.live_chat_enabled}
+                  onCheckedChange={(v) => setPartForm((prev) => ({ ...prev, live_chat_enabled: v }))}
+                  className="data-[state=checked]:bg-red-500"
+                />
+                <Label className="cursor-pointer flex items-center gap-1.5 text-sm">
+                  <MessageCircle className="w-4 h-4 text-red-500" />
+                  Enable Live Chat
+                </Label>
+              </div>
+            )}
 
             <div>
               <Label>{partForm.kind === 'live' ? 'FastPix Live UUID' : 'Bunny Video UUID'}</Label>

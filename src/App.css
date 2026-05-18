@@ -188,9 +188,17 @@ body:has([data-home-header]) [data-global-nav] {
   animation: count-fade 0.3s ease-out;
 }
 
-/* ===== Admin Dashboard: Thin Custom Scrollbar (Desktop only) ===== */
+/* ===== Admin Dashboard: Thin Custom Scrollbar ===== */
+.admin-scroll {
+  scrollbar-width: thin !important;
+  scrollbar-color: hsl(var(--border)) transparent !important;
+  -ms-overflow-style: auto !important;
+}
+
 .admin-scroll::-webkit-scrollbar {
+  display: block !important;
   width: 5px;
+  height: 5px;
 }
 
 .admin-scroll::-webkit-scrollbar-track {
@@ -204,12 +212,6 @@ body:has([data-home-header]) [data-global-nav] {
 
 .admin-scroll::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.3);
-}
-
-/* Firefox */
-.admin-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
 }
 
 /* ===== Plyr Custom Skin ===== */
@@ -326,7 +328,7 @@ body:has([data-home-header]) [data-global-nav] {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Desktop (PC): Normal scrolling, Normal scrollbar, 0 extra padding */
+  /* Desktop (PC): Normal scrolling, Hidden scrollbar globally, 0 extra padding */
   .page-safe-bottom {
     padding-bottom: 0;
   }
@@ -337,21 +339,12 @@ body:has([data-home-header]) [data-global-nav] {
       padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    /* Hide Scrollbar on Mobile/Tablet */
-    ::-webkit-scrollbar { display: none; }
-    html { scrollbar-width: none; }
-    body { -ms-overflow-style: none; }
-
     /* Fix: Prevent header/top images from getting clipped or hidden when scrolling */
     html, body {
       overflow-x: hidden;
       overflow-y: auto;
       scroll-behavior: smooth;
     }
-
-    /* Hide admin thin scrollbar on mobile too */
-    .admin-scroll::-webkit-scrollbar { display: none; }
-    .admin-scroll { scrollbar-width: none; }
   }
 
   /* Navbar Container Height */
@@ -365,3 +358,44 @@ body:has([data-home-header]) [data-global-nav] {
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* =====================================================================
+   GLOBAL SCROLLBAR HIDE (All Devices, All Pages)
+   Placed OUTSIDE @layer so it has highest CSS specificity priority.
+   Guarantees scroll functionality remains, but UI gray bar is removed.
+   ===================================================================== */
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, 
+figure, figcaption, footer, header, hgroup, 
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE and Edge */
+}
+
+html::-webkit-scrollbar, body::-webkit-scrollbar, div::-webkit-scrollbar, span::-webkit-scrollbar,
+applet::-webkit-scrollbar, object::-webkit-scrollbar, iframe::-webkit-scrollbar,
+h1::-webkit-scrollbar, h2::-webkit-scrollbar, h3::-webkit-scrollbar, h4::-webkit-scrollbar, h5::-webkit-scrollbar, h6::-webkit-scrollbar, p::-webkit-scrollbar, blockquote::-webkit-scrollbar, pre::-webkit-scrollbar,
+a::-webkit-scrollbar, abbr::-webkit-scrollbar, acronym::-webkit-scrollbar, address::-webkit-scrollbar, big::-webkit-scrollbar, cite::-webkit-scrollbar, code::-webkit-scrollbar,
+del::-webkit-scrollbar, dfn::-webkit-scrollbar, em::-webkit-scrollbar, img::-webkit-scrollbar, ins::-webkit-scrollbar, kbd::-webkit-scrollbar, q::-webkit-scrollbar, s::-webkit-scrollbar, samp::-webkit-scrollbar,
+small::-webkit-scrollbar, strike::-webkit-scrollbar, strong::-webkit-scrollbar, sub::-webkit-scrollbar, sup::-webkit-scrollbar, tt::-webkit-scrollbar, var::-webkit-scrollbar,
+b::-webkit-scrollbar, u::-webkit-scrollbar, i::-webkit-scrollbar, center::-webkit-scrollbar,
+dl::-webkit-scrollbar, dt::-webkit-scrollbar, dd::-webkit-scrollbar, ol::-webkit-scrollbar, ul::-webkit-scrollbar, li::-webkit-scrollbar,
+fieldset::-webkit-scrollbar, form::-webkit-scrollbar, label::-webkit-scrollbar, legend::-webkit-scrollbar,
+table::-webkit-scrollbar, caption::-webkit-scrollbar, tbody::-webkit-scrollbar, tfoot::-webkit-scrollbar, thead::-webkit-scrollbar, tr::-webkit-scrollbar, th::-webkit-scrollbar, td::-webkit-scrollbar,
+article::-webkit-scrollbar, aside::-webkit-scrollbar, canvas::-webkit-scrollbar, details::-webkit-scrollbar, embed::-webkit-scrollbar, 
+figure::-webkit-scrollbar, figcaption::-webkit-scrollbar, footer::-webkit-scrollbar, header::-webkit-scrollbar, hgroup::-webkit-scrollbar, 
+menu::-webkit-scrollbar, nav::-webkit-scrollbar, output::-webkit-scrollbar, ruby::-webkit-scrollbar, section::-webkit-scrollbar, summary::-webkit-scrollbar,
+time::-webkit-scrollbar, mark::-webkit-scrollbar, audio::-webkit-scrollbar, video::-webkit-scrollbar {
+  display: none !important; /* Chrome, Safari, Opera */
+}
+
+

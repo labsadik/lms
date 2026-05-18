@@ -4,12 +4,13 @@ import { supabase } from "@/integrations/supabase/client";
 import VideoPlayer from "@/components/VideoPlayer";
 import GamifyChip from "@/components/GamifyChip";
 import CommentUI from "@/components/CommentUI";
+import LiveChat from "@/components/LiveChat";
 import Notes from "@/components/Notes";
 import { Button } from "@/components/ui/button";
 import {
   Play, Clock, ChevronRight, ListChecks, Trophy,
   Lock, CheckCircle2, BookOpen, GraduationCap,
-  ArrowLeft, MessageCircle, Heart, StickyNote,
+  ArrowLeft, MessageCircle, Heart, StickyNote, Radio,
 } from "lucide-react";
 import { completePart, awardWatchedMinute } from "@/lib/gamify";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,14 +24,15 @@ import { cn } from "@/lib/utils";
 interface Course { id: string; title: string; [k: string]: unknown }
 
 interface Part {
-  id: string; 
-  name: string; 
-  video_id: string; 
-  kind: "recorded" | "live"; 
+  id: string;
+  name: string;
+  video_id: string;
+  kind: "recorded" | "live";
   notes_url: string | null;
-  duration: string | null; 
-  position: number; 
+  duration: string | null;
+  position: number;
   is_preview: boolean;
+  live_chat_enabled: boolean;
 }
 
 interface Chapter { id: string; name: string; position: number; parts: Part[] }
@@ -301,12 +303,28 @@ function LectureItem({
         {locked ? <Lock className="w-4 h-4" /> : done ? <CheckCircle2 className="w-4.5 h-4.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={cn("text-sm font-semibold leading-snug line-clamp-1", active ? "text-primary" : "text-foreground")}>
-          {part.name}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className={cn("text-sm font-semibold leading-snug line-clamp-1", active ? "text-primary" : "text-foreground")}>
+            {part.name}
+          </p>
+          {part.kind === "live" && (
+            <span className="shrink-0 flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-50 dark:bg-red-950/30 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+              </span>
+              LIVE
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-muted-foreground">
           {part.duration && <span className="flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{part.duration}</span>}
           {part.is_preview && !locked && <span className="text-primary/60 font-medium">Free</span>}
+          {part.kind === "live" && part.live_chat_enabled && !locked && (
+            <span className="flex items-center gap-0.5 text-red-500/70 font-medium">
+              <Radio className="w-2.5 h-2.5" />Chat
+            </span>
+          )}
         </div>
       </div>
       {!locked && (
@@ -457,6 +475,7 @@ export default function Learn() {
   });
 
   const [commentOpen, setCommentOpen] = useState<boolean>(false);
+  const [liveChatOpen, setLiveChatOpen] = useState<boolean>(false);
   const [watchPct, setWatchPct] = useState<number>(0);
 
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
@@ -520,7 +539,8 @@ export default function Learn() {
                 notes_url,
                 duration,
                 position,
-                is_preview
+                is_preview,
+                live_chat_enabled
               )
             )
           `).eq("course_id", course.id).order("position"),
@@ -534,7 +554,10 @@ export default function Learn() {
         setTree((tr.data || []).map((s: any) => ({
           ...s,
           chapters: (s.chapters || []).sort((a: any, b: any) => a.position - b.position).map((c: any) => ({
-            ...c, parts: (c.parts || []).sort((a: any, b: any) => a.position - b.position),
+            ...c, parts: (c.parts || []).sort((a: any, b: any) => a.position - b.position).map((p: any) => ({
+              ...p,
+              live_chat_enabled: p.live_chat_enabled ?? false,
+            })),
           })),
         })));
         
@@ -641,6 +664,14 @@ export default function Learn() {
 
   const isPartLocked = useCallback((p: Part) => !enrolled && !p.is_preview, [enrolled]);
 
+  /* ── Derived: should live chat be available? ── */
+  const showLiveChat = activePart?.kind === "live" && activePart.live_chat_enabled;
+
+  /* ── Auto-close live chat if feature becomes unavailable ── */
+  useEffect(() => {
+    if (!showLiveChat) setLiveChatOpen(false);
+  }, [showLiveChat]);
+
   /* ── Navigation ── */
   const navigateTo = useCallback((level: ViewLevel) => {
     if (level === "subjects") { setActiveSubjectIdx(null); setActiveChapterIdx(null); setActivePart(null); }
@@ -648,6 +679,7 @@ export default function Learn() {
     else if (level === "lectures") { setActivePart(null); }
     setView(level);
     setCommentOpen(false);
+    setLiveChatOpen(false);
   }, []);
 
   const goBack = useCallback(() => {
@@ -659,18 +691,18 @@ export default function Learn() {
 
   const openSubject = useCallback((idx: number) => {
     if (isSubjectLocked(tree[idx])) { toast.error("Enroll to unlock this section"); return; }
-    setActiveSubjectIdx(idx); setActiveChapterIdx(null); setActivePart(null); setView("chapters"); setCommentOpen(false);
+    setActiveSubjectIdx(idx); setActiveChapterIdx(null); setActivePart(null); setView("chapters"); setCommentOpen(false); setLiveChatOpen(false);
   }, [tree, isSubjectLocked]);
 
   const openChapter = useCallback((idx: number) => {
     if (!activeSubject) return;
     if (isChapterLocked(activeSubject.chapters[idx])) { toast.error("Enroll to unlock this chapter"); return; }
-    setActiveChapterIdx(idx); setActivePart(null); setView("lectures"); setCommentOpen(false);
+    setActiveChapterIdx(idx); setActivePart(null); setView("lectures"); setCommentOpen(false); setLiveChatOpen(false);
   }, [activeSubject, isChapterLocked]);
 
   const openLecture = useCallback((part: ExtendedPart) => {
     if (isPartLocked(part)) { toast.error("Enroll to unlock this lecture"); return; }
-    setActivePart(part); setView("player"); setWatchPct(0); setCommentOpen(false);
+    setActivePart(part); setView("player"); setWatchPct(0); setCommentOpen(false); setLiveChatOpen(false);
   }, [isPartLocked]);
 
   const openNotes = useCallback((url: string, title: string) => {
@@ -907,6 +939,7 @@ export default function Learn() {
         {view === "player" && activePart && (
           <>
             <div className="flex flex-col min-h-0 w-full lg:flex-1">
+              {/* ── Video ── */}
               <div className="shrink-0 relative w-full bg-black aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0">
                 <div className="absolute inset-0">
                   <VideoPlayer
@@ -922,16 +955,37 @@ export default function Learn() {
                     onMinuteWatched={activePart.kind === "recorded" ? handleMinute : undefined}
                   />
                 </div>
+
+                {/* Progress bar for recorded */}
                 {activePart.kind === "recorded" && watchPct > 0 && (
                   <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/10 z-50">
                     <div className="h-full bg-primary/80 transition-all duration-700 ease-out rounded-r-full" style={{ width: `${watchPct}%` }} />
                   </div>
                 )}
+
+                {/* LIVE badge for live parts */}
+                {activePart.kind === "live" && (
+                  <div className="absolute top-3 left-3 z-50 flex items-center gap-1.5 bg-red-600 text-white px-2.5 py-1 rounded-md text-xs font-bold shadow-lg animate-in fade-in duration-300">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                    </span>
+                    LIVE
+                  </div>
+                )}
               </div>
 
+              {/* ── Video Info + Actions ── */}
               <div className="shrink-0 bg-card border-t border-border/40">
                 <div className="px-4 sm:px-5 lg:px-6 py-3 sm:py-4">
-                  <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug">{activePart.name}</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug">{activePart.name}</h2>
+                    {activePart.kind === "live" && (
+                      <span className="shrink-0 text-[10px] font-bold text-red-500 bg-red-50 dark:bg-red-950/30 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800">
+                        LIVE
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1.5 text-xs sm:text-[13px] text-muted-foreground">
                     <span className="font-semibold text-primary">{activePart.subjectName}</span>
                     <span className="text-border/60">·</span>
@@ -970,6 +1024,8 @@ export default function Learn() {
                       <StickyNote className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Notes
                     </Button>
                   )}
+
+                  {/* Comments toggle — only for recorded parts */}
                   {activePart.kind === "recorded" && (
                     <Button
                       variant={commentOpen ? "secondary" : "outline"}
@@ -981,9 +1037,33 @@ export default function Learn() {
                       {commentOpen ? "Hide Comments" : "Comments"}
                     </Button>
                   )}
+
+                  {/* Live Chat toggle — only for live parts with chat enabled */}
+                  {showLiveChat && (
+                    <Button
+                      variant={liveChatOpen ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => setLiveChatOpen((v: boolean) => !v)}
+                      className={cn(
+                        "h-9 sm:h-10 text-xs sm:text-[13px] font-medium gap-1.5 rounded-lg px-3 sm:px-3.5",
+                        liveChatOpen && "text-red-600 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50"
+                      )}
+                    >
+                      <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      {liveChatOpen ? "Hide Chat" : "Live Chat"}
+                    </Button>
+                  )}
                 </div>
               </div>
 
+              {/* ── Live Chat mobile (below video) ── */}
+              {showLiveChat && liveChatOpen && (
+                <div className="flex lg:hidden flex-col flex-1 min-h-[50dvh] border-t border-border/40 bg-card overflow-hidden animate-in slide-in-from-bottom-2 duration-300">
+                  <LiveChat partId={activePart.id} />
+                </div>
+              )}
+
+              {/* ── Comment UI mobile (below video, recorded only) ── */}
               {activePart.kind === "recorded" && commentOpen && (
                 <div className="flex lg:hidden flex-col flex-1 min-h-[50dvh] border-t border-border/40 bg-card overflow-hidden animate-in slide-in-from-bottom-2 duration-300">
                   <CommentUI partId={activePart.id} />
@@ -991,6 +1071,14 @@ export default function Learn() {
               )}
             </div>
 
+            {/* ── Live Chat desktop side panel ── */}
+            {showLiveChat && liveChatOpen && (
+              <div className="hidden lg:flex w-[340px] xl:w-[400px] shrink-0 border-l border-border/40 bg-card flex-col overflow-hidden animate-in slide-in-from-right-2 duration-300">
+                <LiveChat partId={activePart.id} />
+              </div>
+            )}
+
+            {/* ── Comment UI desktop side panel (recorded only) ── */}
             {activePart.kind === "recorded" && commentOpen && (
               <div className="hidden lg:flex w-[340px] xl:w-[400px] shrink-0 border-l border-border/40 bg-card flex-col overflow-hidden animate-in slide-in-from-right-2 duration-300">
                 <CommentUI partId={activePart.id} />

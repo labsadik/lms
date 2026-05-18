@@ -109,9 +109,9 @@ export type Database = {
         Relationships: [{ foreignKeyName: "enrollments_course_id_fkey"; columns: ["course_id"]; isOneToOne: false; referencedRelation: "courses"; referencedColumns: ["id"] }]
       }
       parts: {
-        Row: { chapter_id: string; created_at: string; duration: string | null; id: string; is_preview: boolean; kind: Database["public"]["Enums"]["part_kind"]; live_url: string | null; name: string; notes_url: string | null; position: number; video_id: string }
-        Insert: { chapter_id: string; created_at?: string; duration?: string | null; id?: string; is_preview?: boolean; kind?: Database["public"]["Enums"]["part_kind"]; live_url?: string | null; name: string; notes_url?: string | null; position?: number; video_id: string }
-        Update: { chapter_id?: string; created_at?: string; duration?: string | null; id?: string; is_preview?: boolean; kind?: Database["public"]["Enums"]["part_kind"]; live_url?: string | null; name?: string; notes_url?: string | null; position?: number; video_id?: string }
+        Row: { chapter_id: string; created_at: string; duration: string | null; id: string; is_preview: boolean; kind: Database["public"]["Enums"]["part_kind"]; live_chat_enabled: boolean; live_url: string | null; name: string; notes_url: string | null; position: number; video_id: string }
+        Insert: { chapter_id: string; created_at?: string; duration?: string | null; id?: string; is_preview?: boolean; kind?: Database["public"]["Enums"]["part_kind"]; live_chat_enabled?: boolean; live_url?: string | null; name: string; notes_url?: string | null; position?: number; video_id: string }
+        Update: { chapter_id?: string; created_at?: string; duration?: string | null; id?: string; is_preview?: boolean; kind?: Database["public"]["Enums"]["part_kind"]; live_chat_enabled?: boolean; live_url?: string | null; name?: string; notes_url?: string | null; position?: number; video_id?: string }
         Relationships: [{ foreignKeyName: "parts_chapter_id_fkey"; columns: ["chapter_id"]; isOneToOne: false; referencedRelation: "chapters"; referencedColumns: ["id"] }]
       }
       profiles: {
