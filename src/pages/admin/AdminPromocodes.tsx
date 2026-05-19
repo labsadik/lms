@@ -500,7 +500,7 @@ const AdminPromocodes = () => {
         <Card className="p-3.5 text-center">
           <Brain className="w-5 h-5 mx-auto mb-1.5 text-orange-500" />
           <div className="text-2xl font-bold text-orange-600">{fmtINR(promoStats.totalPerceivedDiscount)}</div>
-          <div className="text-[11px] text-muted-foreground font-medium">&quot;Savings&quot; Users Think</div>
+          <div className="text-[11px] text-muted-foreground font-medium">&quot;Total&quot; Used</div>
         </Card>
         <Card className="p-3.5 text-center col-span-2 sm:col-span-1">
           <IndianRupee className="w-5 h-5 mx-auto mb-1.5 text-emerald-500" />

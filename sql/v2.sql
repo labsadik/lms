@@ -349,6 +349,23 @@ CREATE TRIGGER trg_courses_updated BEFORE UPDATE ON public.courses
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- =====================================================================
+-- 5.1 PROMOCODE TRIGGER (Auto-increment uses_count)
+-- =====================================================================
+CREATE OR REPLACE FUNCTION public.increment_promocode_uses()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$ BEGIN
+  UPDATE public.promocodes
+  SET uses_count = uses_count + 1
+  WHERE id = NEW.promocode_id;
+  RETURN NEW;
+END;
+ $$;
+
+DROP TRIGGER IF EXISTS trg_increment_promocode_uses ON public.promocode_redemptions;
+CREATE TRIGGER trg_increment_promocode_uses
+  AFTER INSERT ON public.promocode_redemptions
+  FOR EACH ROW EXECUTE FUNCTION public.increment_promocode_uses();
+
+-- =====================================================================
 -- 6. SECURITY-DEFINER HELPER FUNCTIONS  (avoid RLS recursion)
 -- =====================================================================
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role)
