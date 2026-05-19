@@ -107,9 +107,9 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
   const navLinks = [
     { to: '/courses', label: 'Courses' },
     ...(user ? [{ to: '/dashboard', label: 'Dashboard' }] : []),
-    ...(user ? [{ to: '/study', label: 'My Learning' }] : []),
+    ...(user ? [{ to: '/study', label: 'Study' }] : []),
     ...(user ? [{ to: '/rewards', label: 'Rewards' }] : []),
-    ...(user ? [{ to: '/refer', label: 'Refer' }] : []),
+    // ...(user ? [{ to: '/refer', label: 'Refer' }] : []),
   ];
 
   return (
@@ -186,12 +186,12 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => nav('/study')} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
                   <Trophy className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <span className="text-sm">My Learning</span>
+                  <span className="text-sm">Study</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setLbOpen(true)} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
+                {/* <DropdownMenuItem onClick={() => setLbOpen(true)} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
                   <Trophy className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="text-sm">Leaderboard</span>
-                </DropdownMenuItem>
+                </DropdownMenuItem> */}
                 <DropdownMenuItem onClick={() => nav('/profile')} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
                   <User className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="text-sm">Profile</span>
@@ -200,10 +200,10 @@ const HeaderContent = ({ pathname }: { pathname: string }) => {
                   <ShoppingBag className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="text-sm">Rewards Shop</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => nav('/refer')} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
+                {/* <DropdownMenuItem onClick={() => nav('/refer')} className="rounded-lg gap-3 px-2.5 py-2 cursor-pointer">
                   <Gift className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span className="text-sm">Refer & Earn</span>
-                </DropdownMenuItem>
+                </DropdownMenuItem> */}
                 {isAdmin && (
                   <>
                     <DropdownMenuSeparator className="-mx-1.5" />

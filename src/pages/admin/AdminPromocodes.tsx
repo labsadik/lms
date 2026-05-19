@@ -996,7 +996,7 @@ const AdminPromocodes = () => {
               <div className="flex-1">
                 <h4 className="font-bold text-foreground text-base mb-1.5">Understand the Psychology <span className="text-orange-500">(This is KEY)</span></h4>
                 <p className="text-muted-foreground">
-                  When a user sees <strong>&quot;You saved ₹2,000 with code DIWALI50!&quot;</strong>, their brain registers a <strong>WIN</strong>.
+                  When a user sees <strong>&quot;You saved ₹2,000 with code FIRST50!&quot;</strong>, their brain registers a <strong>WIN</strong>.
                   They feel smart. They feel they beat the system. This positive emotion:
                 </p>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1033,7 +1033,7 @@ const AdminPromocodes = () => {
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { code: 'LAUNCH50', desc: 'Launch offer' },
-                    { code: 'DIWALI2024', desc: 'Festival' },
+                    { code: 'START2024', desc: 'Festival' },
                     { code: 'FIRST100', desc: 'Early buyers' },
                     { code: 'WELCOME30', desc: 'New users' },
                     { code: 'EARLYBIRD', desc: 'Pre-launch' },
